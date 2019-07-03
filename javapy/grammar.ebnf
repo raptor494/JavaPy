@@ -1,0 +1,249 @@
+# Start Symbols for the grammar: compilation_unit
+# Grammar Notation:
+(*
+Patterns:
+    X - matches the rule named 'X'
+    X Y - matches X followed by Y
+    (X) - (grouping) matches X
+    [X] - (optional) matches X exactly zero or one time(s)
+    {X} - (mutiple) matches X zero or more times
+    {{X}} - (multiple+) matches X one or more times
+    X*N - (where N is a positive nonzero integer) matches X exactly N times
+    X*(A:B) - (where A&B are positive integers and A < B) matches X at least A times and at most B times
+    X*(A,B) - (where A&B are either positive integers or are ranges as described above) matches X either A times or B times (can put as many comma-separated ranges in as you want)
+    X -Y  - (negation) matches X only if the result does not also match Y
+    X -Y -Z  - (negation+) matches X only if the result does not also match Y and/or Z
+    X|Y - matches either X or Y
+    X&Y - (unordered) matches X and Y in no particular order, each exactly once
+    X^Y - (unordered+) matches X and Y zero or once, in no particular order, and must match either X or Y once. For example, in the two-option case, X^Y is the same as (X Y? | Y X?)
+    if(x) then (Y) - if the boolean expression x is true, matches Y. otherwise, always matches nothing successfully.
+    if(x) then (Y) else (Z) - if the boolean expression x is true, matches Y. otherwise, matches Z.
+    if(x) then (Y) else (!) - if the boolean expression x is true, matches Y. otherwise, fails to match.
+    if(x) then (Y) elif (Z) then (W) else (Q) - you get the idea.
+    F(X) - matches the function F with argument X
+
+Definitions:
+    Name: Pattern - defines the rule 'Name'. Rule names must begin with an uppercase letter but may not be entirely uppercase, unless they consist of only 1 alphabetic character. Rule names also cannot end with an underscore.
+    Name(Args): Pattern - defines the function 'Name'. For Args, see below section. Function names follow the same rules as rule names.
+    NAME: /"REGEX"/ - defines the token rule 'NAME'. Token rules must be entirely capitalized and must start with a letter and cannot end with an underscore.
+
+Function Arguments:
+  - consist of comma-separated arguments which match the following patterns:
+    Name  - a Rule argument.
+    Name = Pattern - an optional Rule argument that defaults to the given pattern.
+    name  - a boolean argument. boolean arguments must begin with a lowercase letter and cannot end with an underscore.
+    name = expr - an optional boolean argument that defaults to the given boolean expression.
+
+*)
+
+dotted_name: NAME {'.' NAME}
+list(r, s=','): r {s r}
+paren_list(r, s=','): list(r, s) | '(' list(r, s) ')'
+ENDL: ';' | NEWLINE
+ENTER: NEWLINE INDENT
+EXIT: DEDENT
+
+literal: (integer_literal | floating_point_literal
+         |boolean_literal | character_literal
+         |string_literal | null_literal)
+
+type_name: NAME -'var'
+type: primitive_type | reference_type
+primitive_type: {annotation} (numeric_type | 'boolean')
+numeric_type: integral_type | floating_point_type
+integral_type: 'byte' | 'short' | 'char' | 'int' | 'long'
+floating_point_type: 'float' | 'double'
+reference_type: array_type | class_type
+array_type: array_component_type dims
+array_component_type: primitive_type | class_type
+class_type: list({annotation} type_name [type_arguments], '.')
+dims: {{{annotation} '[' ']'}}
+type_parameters: '<' paren_list(type_parameter) '>'
+type_parameter: {annotation} type_name [type_bound]
+type_bound: 'extends' paren_list(class_type, '&')
+type_arguments: '<' paren_list(type_argument) '>'
+type_argument: reference_type | wildcard
+wildcard: {annotation} '?' [wildcard_bounds]
+wildcard_bounds: ('extends'|'super') reference_type
+
+compilation_unit: ordinary_compilation_unit | modular_compilation_unit
+ordinary_compilation_unit: [package_declaration] {import_declaration} {type_declaration}
+modular_compilation_unit: {import_declaration} module_declaration
+package_declaration: {annotation} 'package' dotted_name ENDL
+import_declaration: ('import' ['static'] import_names ENDL
+                    |'from' dotted_name 'import' ['static'] from_import_names ENDL)
+import_names: paren_list(import_name)
+from_import_names: paren_list(import_name | '*')
+import_name: dotted_name ['.' '*']
+type_declaration: class_declaration | interface_declaration | enum_declaration | annotation_declaration
+module_declaration: {annotation} ['open'] 'module' dotted_name module_body
+module_body: ':' (';' [NEWLINE] | ENTER {module_directive} EXIT)
+module_directive: (requires_directive | exports_directive
+                  |opens_directive | uses_directive
+                  |provides_directive)
+requires_directive: 'requires' (['static'] & ['transitive']) dotted_name ENDL
+exports_directive: 'exports' dotted_name ['to' paren_list(dotted_name)] ENDL
+opens_directive: 'opens' dotted_name ['to' paren_list(dotted_name)] ENDL
+uses_directive: 'uses' dotted_name ENDL
+provides_directive: 'provides' dotted_name 'with' paren_list(dotted_name) ENDL
+
+modifier: annotation | kw_modifier
+kw_modifier: ('public' | 'protected' | 'private'
+             |'static' | 'abstract' | 'final'
+             |'strictfp' | 'transient' | 'volatile'
+             |'native' | 'synchronized' | 'default')
+class_declaration: {modifier} 'class' NAME [type_parameters] ['extends' class_type] ['implements' paren_list(class_type)] class_body
+class_body: ':' (';' [NEWLINE] | ENTER {class_body_declaration} EXIT)
+class_body_declaration: (class_member_declaration 
+                        |instance_initializer
+                        |static_initializer
+                        |constructor_declaration)
+class_member_declaration: (field_declaration
+                          |method_declaration
+                          |type_declaration
+                          |';' [NEWLINE])
+field_declaration: {modifier} type list(variable_declarator) ENDL
+variable_declarator: NAME [dims] ['=' variable_initializer]
+variable_initializer: expression | array_initializer
+array_initializer: '{' [list(variable_initializer)] [','] '}'
+method_declaration: {modifier} [type_parameters {annotation}] ('void' | type) NAME method_parameter_list [dims] [throws] method_body
+method_body: NEWLINE | ';' [NEWLINE] | block
+method_parameter_list: '(' [(receiver_parameter [{',' formal_parameter}] | list(formal_parameter))] ')'
+formal_parameter_list: '(' [list(formal_parameter)] ')'
+receiver_parameter: {annotation} type [NAME '.'] 'this'
+formal_parameter: {modifier} type ({annotation} '...' NAME | NAME [dims])
+throws: 'throws' paren_list(class_type)
+instance_initializer: 'this' block
+static_initializer: 'static' block
+constructor_declaration: {modifier} [type_parameters] type_name method_parameter_list [throws] block
+explicit_constructor_invocation: [primary '.'] [type_arguments] ('this'|'super') arguments ENDL
+enum_declaration: {modifier} 'enum' type_name ['implements' paren_list(class_type)] enum_body
+enum_body: ':' (';' [NEWLINE] | ENTER {enum_constant} {class_body_declaration} EXIT)
+enum_constant: {annotation} NAME [arguments] [class_body]
+
+interface_declaration: {modifier} 'interface' type_name [type_parameters] ['extends' list(class_type)] interface_body
+interface_body: ':' (';' [NEWLINE] | ENTER {interface_member_declaration} EXIT)
+interface_member_declaration: (constant_declaration
+                              |method_declaration
+                              |type_declaration
+                              |';' [NEWLINE])
+constant_declaration: {modifier} type list(constant_declarator) ENDL
+constant_declarator: NAME [dims] '=' variable_initializer
+annotation_declaration: {modifier} '@' 'interface' type_name annotation_body
+annotation_body: ':' (';' [NEWLINE] | ENTER {annotation_member_declaration} EXIT)
+annotation_member_declaration: (annotation_element_declaration
+                               |constant_declaration
+                               |type_declaration
+                               |';')
+annotation_element_declaration: {modifier} type NAME '(' ')' [dims] ['default' element_value] ENDL
+annotation: '@' dotted_name ['(' [element_value | list(element_value_pair)] ')']
+element_value_pair: NAME '=' element_value
+element_value: (conditional_expression
+               |element_value_array_initializer
+               |annotation)
+element_value_array_initializer: '{' [list(element_value)] [','] '}'
+
+block: ':' (';' ENDL | statement | ENTER {block_statement} EXIT)
+block_statement: (local_variable_declaration_statement
+                 |class_declaration
+                 |statement)
+local_variable_declaration_statement: local_variable_declaration ENDL
+local_variable_declaration: {modifier} ('var' | type) list(variable_declarator)
+statement: (';' ENDL
+           |switch_statement
+           |assert_statement
+           |do_statement
+           |break_statement
+           |continue_statement
+           |yield_statement
+           |return_statement
+           |synchronized_statement
+           |throw_statement
+           |try_statement
+           |labeled_statement
+           |if_statement
+           |while_statement
+           |for_statement
+           |explicit_constructor_invocation
+           |expression_statement)
+labeled_statement: NAME ':' (ENTER {block_statement} EXIT | statement)
+expression_statement: expression ENDL
+if_statement: 'if' expression block ['else' (if_statement | block)]
+assert_statement: 'assert' expression [':' expression] ENDL
+switch_statement: 'switch' expression switch_block
+switch_block: ':' ENTER {switch_block_statement_group} EXIT
+switch_block_statement_group: switch_label ('->' (throw_statement | expression_statement | '{' ENTER {block_statement} EXIT '}')
+                                            | block)
+switch_label: ('case' paren_list(expression)
+              |'default')
+while_statement: 'while' expression block
+do_statement: 'do' block 'while' expression ENDL
+for_statement: 'for' for_control block
+for_control: basic_for_control | enhanced_for_control
+basic_for_control: [for_init] ';' [expression] ';' [list(expression)]
+for_init: expression | local_variable_declaration | '(' local_variable_declaration ')'
+enhanced_for_control: enhanced_for_var ':' expression
+enhanced_for_var: enhanced_for_var1 | '(' enhanced_for_var1 ')'
+enhanced_for_var1: {modifier} ('var' | type) NAME [dims]
+break_statement: 'break' [NAME] ENDL
+continue_statement: 'continue' [NAME] ENDL
+return_statement: 'return' [expression] ENDL
+throw_statement: 'throw' expression ENDL
+synchronized_statement: 'synchronized' expression block
+try_statement: 'try' [resource_specification] block {catch_clause} ['finally' block]
+catch_clause: 'catch' catch_formal_parameter block
+catch_formal_parameter: '(' {modifier} catch_type (')' & NAME) | {modifier} catch_type NAME
+catch_type: paren_list(class_type, '|')
+resource_specification: '(' list(resource, ';') [';'] ')' | list(resource, ';')
+resource: expression | {modifier} ('var' | type) NAME '=' expression
+
+primary: primary_no_new_array | array_creation_expression
+primary_no_new_array: (literal
+                      |class_literal
+                      |this
+                      |type_name '.' this
+                      |'(' expression ')'
+                      |class_instance_creation_expression
+                      |field_access
+                      |array_access
+                      |NAME
+                      |method_invocation
+                      |method_reference)
+class_literal: ((type_name | dotted_name) [dims] '.' 'class'
+               |numeric_type [dims] '.' 'class'
+               |'boolean' [dims] '.' 'class'
+               |'void' '.' 'class')
+class_instance_creation_expression: [primary '.'] 'new' [type_arguments] list({annotation} type_name, '.') [type_arguments_or_diamond] arguments ['{' ('}' | ENTER {class_member_declaration} EXIT '}')]
+arguments: '(' [list(expression)] ')'
+type_arguments_or_diamond: '<' '>' | type_arguments
+field_access: ([dotted_name '.'] 'super' | primary) '.' NAME
+array_access: (dotted_name | primary_no_new_array) '[' expression ']'
+method_invocation: [([dotted_name '.'] 'super' | primary) '.'] [type_arguments] NAME arguments
+method_reference: (primary | 'super' | reference_type | array_type | class_type) '::' [type_arguments] ('new' | NAME)
+array_creation_expression: 'new' (primitive_type|class_type) (dim_exprs [dims] | dims array_initializer)
+dim_exprs: dim_expr {dim_expr}
+dim_expr: {annotation} '[' expression ']'
+expression: lambda_expression | assignment_expression
+lambda_expression: lambda_parameters '->' lambda_body
+lambda_parameters: '(' [list(NAME) | list(lambda_parameter)] ')' | NAME
+lambda_parameter: {modifier} ('var' | type) ({annotation} '...' NAME | NAME [dims])
+lambda_body: '{' ('}' | ENTER {block_statement} EXIT) | expression
+assignment_expression: conditional_expression [assignment_operator expression]
+assignment_operator: '=' | '*=' | '/=' | '+=' | '-=' | '%=' | '<<=' | '>>=' | '>>>=' | '&=' | '^=' | '|='
+conditional_expression: conditional_or_expression ['?' expression ':' (conditional_expression | lambda_expression)]
+conditional_or_expression: list(conditional_and_expression, '||')
+conditional_and_expression: list(inclusive_or_expression, '&&')
+inclusive_or_expression: list(exclusive_or_expression, '|')
+exclusive_or_expression: list(and_expression, '^')
+and_expression: list(equality_expression, '&')
+equality_expression: list(relational_expression, '=='|'!=')
+relational_expression: shift_expression {relational_operator shift_expression | 'instanceof' reference_type}
+relational_operator: '<=' | '>=' | '<' | '>'
+shift_expression: list(additive_expresion, shift_operator)
+shift_operator: '<<' | '>>>' | '>>'
+additive_expresion: list(multiplicative_expression, '+'|'-')
+multiplicative_expression: list(unary_expression, '*'|'/'|'%')
+unary_expression: {'++'|'--'|'+'|'-'} unary_expression_not_plus_minus
+unary_expression_not_plus_minus: {'~'|'!'} unary_expression | postfix_expression | cast_expression
+postfix_expression: primary {'++'|'--'}
+cast_expression: '(' (primitive_type | list(reference_type, '&')) ')' (unary_expression_not_plus_minus | lambda_expression)
