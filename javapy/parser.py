@@ -965,7 +965,10 @@ class Parser:
 
     def parse_synchronized(self):
         self.require('synchronized')
-        lock = self.parse_expr()
+        if self.would_accept(':'):
+            lock = tree.This()
+        else:
+            lock = self.parse_expr()
         body = self.parse_block()
         return tree.SynchronizedBlock(lock=lock, body=body)
 
