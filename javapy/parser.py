@@ -308,7 +308,7 @@ class Parser:
         if self.accept('*'):
             return base_name, True
         else:
-            base_name += '.' + self.parse_qual_name()
+            base_name += self.parse_qual_name()
             wildcard = bool(self.accept('.', '*'))
             return base_name, wildcard
 
@@ -1905,7 +1905,7 @@ class Parser:
 
     def parse_switch_expr(self):
         self.require('switch')
-        condition = self.parse_expr()
+        condition = self.parse_condition()
         self.require('{', NEWLINE, INDENT)
         cases = []
         while not self.would_accept((DEDENT, ENDMARKER)):
@@ -2569,7 +2569,7 @@ class JavaParser(Parser):
 
     def parse_switch_expr(self):
         self.require('switch')
-        condition = self.parse_expr()
+        condition = self.parse_condition()
         self.require('{')
         cases = []
         while not self.would_accept(('}', ENDMARKER)):
