@@ -1,14 +1,15 @@
-if __name__ == '__main__':
-    from os.path import basename
-    print('Error:', basename(__file__), 'is not a script')
-    exit(1)    
-
-from typing import List, Set, Tuple
+from typing import List, Set, Tuple, Iterable, Union, Optional
 from abc import ABC, abstractmethod
-from javapy.util import *
+try:
+    from javapy.util import *
+except ImportError:
+    from util import *
 from textwrap import indent, dedent
+from typeguard import check_type, check_argument_types
 import re
 import functools
+
+INDENT_WITH = '\t'
 
 @functools.total_ordering
 class Position:
@@ -27,9 +28,7 @@ class Position:
     __slots__ = ('line', 'column', 'linestr')
 
     def __init__(self, line: int, column: int, linestr: str):
-        typecheck(line, int, function='Position')
-        typecheck(column, int, function='Position')
-        typecheck(linestr, str, function='Position')
+        assert check_argument_types()
         super().__setattr__('line', line)
         super().__setattr__('column', column)
         super().__setattr__('linestr', linestr)
@@ -89,13 +88,6 @@ class Position:
 
 Position.NOPOS = Position(0, 0, '')
 
-# def cplist(lst: list) -> list:
-#     if lst is not None:
-#         if isinstance(lst, NodeList):
-#             return lst.copy()
-#         else:
-#             return list(lst)
-
 def copy(node, parent=None):
     if node is None:
         return None
@@ -107,23 +99,38 @@ def copy(node, parent=None):
         return node
 
 class Node(ABC):
-    def __init__(self, parent=None):
-        typecheck(parent, (NoneType, Node), function=typename(self))
+    def __init__(self, parent: Optional['Node']=None):
+        assert check_argument_types()
+        # check_type('parent', parent, Optional[Node])
 
         self.parent: Node = parent
         
-        self.children: NodeList = NodeList()
+        self.children = NodeList()
 
     def copy(self, parent=None):
         elems = {'parent': parent}
         for key, value in self.__dict__.items():
             if key not in ('parent', 'children') and key[0] != '_':
                 elems[key] = copy(value)
-        return type(self)(**elems)
+        return type(self)(**elems) 
 
     @abstractmethod
     def __str__(self):
         return NotImplemented
+
+    def __eq__(self, other):
+        if self is other:
+            return True
+        if type(self) == type(other):
+            keys = self.__dict__.keys()
+            if keys != other.__dict__.keys():
+                return False
+            for key in keys:
+                if key not in ('parent', 'children'):
+                    if self.__dict__[key] != other.__dict__[key]:
+                        return False
+            return True
+        return False
 
     def accept(self, visitor, value):
         """ A NodeVisitor visits this Node.
@@ -190,9 +197,10 @@ class Node(ABC):
         super().__setattr__(name, value)
 
 class NodeList(list):
-    def __init__(self, value=[], parent=None):
-        listtypecheck(value, list, (Node, NoneType, list), name=0, function='NodeList')
-        typecheck(parent, (NoneType, Node), function='NodeList')
+    def __init__(self, value: List[Optional[Union[Node, list]]]=[], parent: Optional[Node]=None):
+        assert check_argument_types()
+        # check_type('value', value, List[Union[Node, list, None]])
+        # check_type('parent', parent, Optional[Node])
         self._list = [] if value is not None and len(value) == 0 else value
         for i, value in enumerate(self._list):
             if isinstance(value, list):
@@ -258,7 +266,7 @@ class NodeList(list):
             for subindex in index:
                 self.__setitem__(subindex, value)
         else:
-            typecheck(value, (NoneType, Node))
+            check_type('value', value, Optional[Node])
             oldval = self._list[index]
             if hasattr(oldval, 'parent'):
                 oldval.parent = None
@@ -291,6 +299,12 @@ class NodeList(list):
         else:
             return self._list == other
 
+    def __contains__(self, other):
+        for item in self:
+            if item == other:
+                return True
+        return False
+
     def append(self, element):
         """ Append object to the end of the list. """
         self._list.append(element)
@@ -305,7 +319,7 @@ class NodeList(list):
         for i in range(oldlen, newlen):
             elem = self._list[i]
             if elem is not None:
-                typecheck(elem, Node, name=f"iterable[{i}]")
+                check_type(f"iterable[{i}]", elem, Node)
                 elem.parent = self.parent
 
     def clear(self):
@@ -352,7 +366,7 @@ class NodeList(list):
     def index(self, x, start=None, end=None):
         if start is None:
             if end is not None:
-                raise ValueError("index() 'end' argument must be None when 'start' is None")
+                raise ValueError("'end' argument must be None when 'start' is None")
             return self._list.index(x)
         elif end is None:
             return self._list.index(x, start)
@@ -376,9 +390,9 @@ class Name(Node):
         if isinstance(value, Name):
             value = str(value)
         else:
-            typecheck(value, str, name=0, function='Name')
+            check_type('value', value, Union[str, Name])
         if not Name.REGEX.match(value):
-            raise ValueError(f"Name() argument is not a valid name")
+            raise ValueError(f"not a valid name: {value!r}")
 
         super().__init__(parent)
 
@@ -389,9 +403,82 @@ class Name(Node):
 
     def accept(self, visitor, value):
         return visitor.visit_name(self, value)
+
+    def index(self, substr, start=0, end=-1):
+        return str(self).index(str(substr) if isinstance(substr, Name) else substr, start, end)
+
+    def rindex(self, substr, start=0, end=-1):
+        return str(self).rindex(str(substr) if isinstance(substr, Name) else substr, start, end)
+
+    def find(self, substr, start=0, end=-1):
+        return str(self).find(str(substr) if isinstance(substr, Name) else substr, start, end)
+
+    def rfind(self, substr, start=0, end=-1):
+        return str(self).rfind(str(substr) if isinstance(substr, Name) else substr, start, end)
+
+    def capitalize(self):
+        return Name(str(self).capitalize())
+
+    def casefold(self):
+        return Name(str(self).casefold())
+
+    def count(self, substr, start=0, end=-1) -> int:
+        return str(self).count(str(substr) if isinstance(substr, Name) else substr, start, end)
+
+    def startswith(self, prefix, start=0, end=-1) -> bool:
+        if isinstance(prefix, Name):
+            split = prefix.split()
+            return self.split()[:len(split)] == split       
+        else:
+            return str(self).startswith(prefix, start, end)
+
+    def endswith(self, suffix, start=0, end=-1) -> bool:
+        if isinstance(suffix, Name):
+            split = suffix.split()
+            return self.split()[-len(split):] == split
+        else:
+            return str(self).endswith(suffix, start, end)
+
+    def upper(self):
+        return Name(str(self).upper())
+
+    def lower(self):
+        return Name(str(self).lower())
+
+    def replace(self, old, new, count=-1):
+        try:
+            return Name(str(self).replace(str(old) if isinstance(old, Name) else old, str(new) if isinstance(new, Name) else new, count))
+        except ValueError as e:
+            raise ValueError(f"result of replacing every substring matching {old!r} with {new!r} in {str(self)!r} would not produce a valid Name") from e
         
+    def split(self, sep=None, maxsplit=-1):
+        return [Name(sub) for sub in str(self).split("." if sep is None else str(sep) if isinstance(sep, Name) else sep, maxsplit)]
+
+    def rsplit(self, sep=None, maxsplit=-1):
+        return [Name(sub) for sub in str(self).rsplit("." if sep is None else str(sep) if isinstance(sep, Name) else sep, maxsplit)]
+
+    def swapcase(self):
+        return Name(str(self).swapcase())
+
+    def title(self):
+        return Name(str(self).replace('.', ' ').title().replace(' ', '.')) 
+
+    def __contains__(self, value):
+        if isinstance(value, str):
+            return value in str(self)
+        elif isinstance(value, Name):
+            return str(value) in str(self)
+        else:
+            return False
+
+    def __len__(self):
+        return len(str(self))
+                
     def __str__(self):
         return self.__strval
+
+    def __repr__(self):
+        return f"Name({self.__strval!r})"
 
     def __hash__(self):
         return hash(self.__strval)
@@ -403,23 +490,62 @@ class Name(Node):
     def isdotted(self):
         return '.' in str(self)
 
-    def __add__(self, other):
+    def __add__(self, other: Union['Name', str]):
+        assert check_argument_types()
         if isinstance(other, str):
-            return Name(str(self) + '.' + other)
+            try:
+                return Name(str(self) + '.' + other)
+            except ValueError as e:
+                raise ValueError(f"result of concatenating {str(self)!r} with {other!r} would not produce a valid name") from e
         else:
-            typecheck(other, (Name, str))
-            return Name(str(self) + '.' + str(other))
+            try:
+                return Name(str(self) + '.' + str(other))
+            except ValueError as e:
+                raise ValueError(f"result of concatenating {str(self)!r} with {str(other)!r} would not produce a valid name") from e
+
+    def __radd__(self, other: Union['Name', str]):
+        assert check_argument_types()
+        if isinstance(other, str):
+            try:
+                return Name(other + '.' + str(self))
+            except ValueError as e:
+                raise ValueError(f"result of concatenating {other!r} with {str(self)!r} would not produce a valid name") from e
+        else:
+            try:
+                return Name(str(other) + '.' + str(self))
+            except ValueError as e:
+                raise ValueError(f"result of concatenating {str(other)!r} with {str(self)!r} would not produce a valid name") from e
 
     def __getitem__(self, index):
         return str(self)[index]
 
-class CompilationUnit(Node):
-    def __init__(self, *, package=None, imports=[], types=[]):
-        typecheck(package, (Package, NoneType), function='CompilationUnit')
-        listtypecheck(imports, list, Import, function='CompilationUnit')
-        listtypecheck(types, list, TypeDeclaration, function='CompilationUnit')
+    @classmethod
+    def join(cls, names):
+        iterator = iter(names)
+        try:
+            result = next(iterator)
+            if not isinstance(result, Name):
+                if isinstance(result, str):
+                    result = cls(result)
+                else:
+                    raise TypeError
+        except StopIteration:
+            raise ValueError("empty iterable given to Name.join()")
+        try:
+            while True:
+                result += next(iterator)
+        except StopIteration:
+            pass
+        return result
 
-        super().__init__(None)
+class CompilationUnit(Node):
+    def __init__(self, *, package: Optional['Package']=None, imports: List['Import']=[], types: List['TypeDeclaration']=[], parent=None):
+        assert check_argument_types()
+        # check_type('package', package, Optional[Package])
+        # check_type('imports', imports, List[Import])
+        # check_type('types', types, List[TypeDeclaration])
+
+        super().__init__(parent)
 
         self.package: Package = package
         self.imports: List[Import] = imports
@@ -455,13 +581,13 @@ class Documented(ABC):
     STARLINE_REGEX = re.compile(r"^(\s*\*).*")
 
     @abstractmethod
-    def __init__(self, doc):
+    def __init__(self, doc: Optional[str]):
         if doc is not None:
             # if isinstance(doc, list):
-            #     itertypecheck(doc, str, function=typename(self))
+            #     check_type('doc', doc, List[str])
             #     lines = doc
             # else:
-                typecheck(doc, str, function=typename(self))
+                check_type('doc', doc, str)
                 if not Documented.DOCSTR_REGEX.match(doc):
                     raise ValueError(f"{typename(self)}() argument 'doc' is not a valid docstring")
                 doc = lstrip_multiline(doc, ignore_first=True)
@@ -531,14 +657,16 @@ class Documented(ABC):
             return ""
     
 class Named(ABC):
-    def __init__(self, name):
-        typecheck(name, Name, function=typename(self))
+    def __init__(self, name: Name):
+        assert check_argument_types()
+        # check_type('name', name, Name)
 
         self.name: Name = name
 
 class Annotated(ABC):
-    def __init__(self, annotations):
-        listtypecheck(annotations, list, Annotation, function=typename(self))
+    def __init__(self, annotations: List['Annotation']):
+        assert check_argument_types()
+        # check_type('annotations', annotations, List[Annotation])
 
         self.annotations: List[Annotation] = annotations
 
@@ -552,10 +680,9 @@ class Annotated(ABC):
 
 class Dimension(ABC):
     @abstractmethod
-    def __init__(self, dimensions):
-        typecheck(dimensions, list, function=typename(self))
-        for i, value in enumerate(dimensions):
-            listtypecheck(value, (NoneType, list), Annotation, function=typename(self), name=f"dimensions[{i}]")
+    def __init__(self, dimensions: List[Optional[List['Annotation']]]):
+        assert check_argument_types()
+        # check_type('dimensions', dimensions, List[Optional[List[Annotation]]])
 
         self.dimensions = dimensions
 
@@ -566,10 +693,11 @@ class Dimension(ABC):
             return ""
 
 class ModuleCompilationUnit(Named, Documented, Annotated, Node):
-    def __init__(self, *, imports=[], open=False, name, members=[], doc=None, annotations=[]):
-        listtypecheck(imports, list, Import, function='ModuleCompilationUnit')
-        typecheck(open, bool, function='ModuleCompilationUnit')
-        listtypecheck(members, list, Directive, function='ModuleCompilationUnit')
+    def __init__(self, *, imports: List['Import']=[], open: bool=False, name, members: List['Directive']=[], doc=None, annotations=[]):
+        assert check_argument_types()
+        # check_type('imports', imports, List[Import])
+        # check_type('open', open, bool)
+        # check_type('members', members, List[Directive])
         
         Node.__init__(self, parent=None)
         Named.__init__(self, name)
@@ -592,15 +720,16 @@ class ModuleCompilationUnit(Named, Documented, Annotated, Node):
             result += "open "
         result += f"module {self.name}"
         if self.members:
-            result += ' {\n\t' + '\n'.join(indent(str(member), '\t') for member in self.members) + '\n}'
+            result += ' {\n' + '\n'.join(indent(str(member), INDENT_WITH) for member in self.members) + '\n}'
         else:
             result += r' {}'
         return result
 
 class Declaration(Annotated):
     @abstractmethod
-    def __init__(self, modifiers, annotations):
-        listtypecheck(modifiers, list, Modifier, function=typename(self))
+    def __init__(self, modifiers: List['Modifier'], annotations):
+        assert check_argument_types()
+        # check_type('modifiers', modifiers, List[Modifier])
 
         Annotated.__init__(self, annotations)
 
@@ -626,9 +755,10 @@ class Package(Node, Named, Documented, Annotated):
         return f"{self.doc_str()}{self.anno_str()}package {self.name};"
 
 class Import(Node, Named):
-    def __init__(self, *, name, static=False, wildcard=False, parent=None):
-        typecheck(static, bool, function='Import')
-        typecheck(wildcard, bool, function='Import')
+    def __init__(self, *, name, static: bool=False, wildcard: bool=False, parent=None):
+        assert check_argument_types()
+        # check_type('static', static, bool)
+        # check_type('wildcard', wildcard, bool)
 
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -638,6 +768,55 @@ class Import(Node, Named):
 
     def accept(self, visitor, value):
         return visitor.visit_import(self, value)
+
+    @property
+    def imported_name(self) -> Name:
+        if self.wildcard:
+            return None
+        try:
+            return Name(self.name[self.name.rindex('.')+1:])
+        except ValueError:
+            return self.name
+
+    @property
+    def imported_type(self) -> Name:
+        if self.static:
+            try:
+                i = self.name.rindex('.')
+                if self.wildcard:
+                    return Name(self.name[i+1:])
+                try:
+                    j = self.name.rindex('.', 0, i)
+                    return Name(self.name[j+1:i])
+                except ValueError:
+                    return Name(self.name[0:i])
+            except ValueError:
+                return self.name
+        else:
+            return self.imported_name
+
+    @property
+    def imported_package(self) -> Name:
+        if self.static:
+            try:
+                i = self.name.rindex('.')
+                if self.wildcard:
+                    return Name(self.name[:i])
+                try:
+                    j = self.name.rindex('.', 0, i)
+                    return Name(self.name[:j])
+                except ValueError:
+                    return None
+            except ValueError:
+                return None
+        elif self.wildcard:
+            return self.name
+        else:
+            try:
+                i = self.name.rindex('.')
+                return Name(self.name[:i])
+            except ValueError:
+                return None
 
     def __str__(self):
         result = "import "
@@ -656,8 +835,9 @@ class Directive(Documented, Named, Node):
         Documented.__init__(self, doc)
 
 class RequiresDirective(Directive):
-    def __init__(self, *, modifiers=[], name, doc=None, parent=None):
-        listtypecheck(modifiers, list, Modifier, function='RequiresDirective')
+    def __init__(self, *, modifiers: List['Modifier']=[], name, doc=None, parent=None):
+        assert check_argument_types()
+        # check_type('modifiers', modifiers, List[Modifier])
 
         super().__init__(name, doc, parent)
 
@@ -670,8 +850,9 @@ class RequiresDirective(Directive):
         return f"{self.doc_str()}requires {Declaration.mod_str(self)}{self.name};"
 
 class ExportsDirective(Directive):
-    def __init__(self, *, name, to=[], doc=None, parent=None):
-        listtypecheck(to, list, Name, function='ExportsDirective')
+    def __init__(self, *, name, to: List[Name]=[], doc=None, parent=None):
+        assert check_argument_types()
+        # check_type('to', to, List[Name])
 
         super().__init__(name, doc, parent)
 
@@ -688,8 +869,9 @@ class ExportsDirective(Directive):
         return result
 
 class OpensDirective(Directive):
-    def __init__(self, *, name, to=[], doc=None, parent=None):
-        listtypecheck(to, list, Name, function='OpensDirective')
+    def __init__(self, *, name, to: List[Name]=[], doc=None, parent=None):
+        assert check_argument_types()
+        # check_type('to', to, List[Name])
 
         super().__init__(name, doc, parent)
 
@@ -713,8 +895,9 @@ class UsesDirective(Directive):
         return f"{self.doc_str()}uses {self.name};"
 
 class ProvidesDirective(Directive):
-    def __init__(self, *, name, provides=[], doc=None, parent=None):
-        listtypecheck(provides, list, Name, function='ProvidesDirective')
+    def __init__(self, *, name, provides: List[Name]=[], doc=None, parent=None):
+        assert check_argument_types()
+        # check_type('provides', provides, List[Name])
 
         super().__init__(name, doc, parent)
 
@@ -733,8 +916,9 @@ class ProvidesDirective(Directive):
 class Member(Documented): pass
 
 class TypeDeclaration(Named, Member, Declaration, Node):
-    def __init__(self, *, name, members=[], doc=None, annotations=[], modifiers=[], parent=None):
-        listtypecheck(members, list, Member, function=typename(self))
+    def __init__(self, *, name, members: List[Member]=[], doc=None, annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('members', members, List[Member])
 
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -744,8 +928,9 @@ class TypeDeclaration(Named, Member, Declaration, Node):
         self.members: List[Member] = members
 
 class GenericDeclaration(Declaration):
-    def __init__(self, typeparams):
-        listtypecheck(typeparams, list, TypeParameter, function=typename(self))
+    def __init__(self, typeparams: List['TypeParameter']):
+        assert check_argument_types()
+        # check_type('typeparams', typeparams, List[TypeParameter])
 
         self.typeparams: List[TypeParameter] = typeparams
 
@@ -758,9 +943,10 @@ class GenericDeclaration(Declaration):
 class Statement(Node): pass
 
 class ClassDeclaration(TypeDeclaration, GenericDeclaration, Statement):
-    def __init__(self, *, name, typeparams=[], superclass=None, interfaces=[], members=[], doc=None, annotations=[], modifiers=[], parent=None):
-        typecheck(superclass, (NoneType, GenericType), function='ClassDeclaration')
-        listtypecheck(interfaces, list, GenericType, function='ClassDeclaration')
+    def __init__(self, *, name, typeparams=[], superclass: Optional['GenericType']=None, interfaces: List['GenericType']=[], members=[], doc=None, annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('superclass', superclass, Optional[GenericType])
+        # check_type('interfaces', interfaces, List[GenericType])
 
         TypeDeclaration.__init__(self, name=name, members=members, doc=doc, annotations=annotations, modifiers=modifiers, parent=parent)
         GenericDeclaration.__init__(self, typeparams)
@@ -778,14 +964,15 @@ class ClassDeclaration(TypeDeclaration, GenericDeclaration, Statement):
         if self.interfaces:
             result += ' implements ' + ', '.join(str(interface) for interface in self.interfaces)
         if self.members:
-            result += ' {\n' + '\n'.join(indent(str(member), '\t') for member in self.members) + '\n}'
+            result += ' {\n' + '\n'.join(indent(str(member), INDENT_WITH) for member in self.members) + '\n}'
         else:
             result += r' {}'
         return result
 
 class InterfaceDeclaration(TypeDeclaration, GenericDeclaration):
-    def __init__(self, *, name, typeparams=[], interfaces=[], members=[], doc=None, annotations=[], modifiers=[], parent=None):
-        listtypecheck(interfaces, list, GenericType, function='InterfaceDeclaration')
+    def __init__(self, *, name, typeparams=[], interfaces: List['GenericType']=[], members=[], doc=None, annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('interfaces', interfaces, List[GenericType])
 
         TypeDeclaration.__init__(self, name=name, members=members, doc=doc, annotations=annotations, modifiers=modifiers, parent=parent)
         GenericDeclaration.__init__(self, typeparams)
@@ -800,7 +987,7 @@ class InterfaceDeclaration(TypeDeclaration, GenericDeclaration):
         if self.interfaces:
             result += ' extends ' + ', '.join(str(interface) for interface in self.interfaces)
         if self.members:
-            result += ' {\n' + '\n'.join(indent(str(member), '\t') for member in self.members) + '\n}'
+            result += ' {\n' + '\n'.join(indent(str(member), INDENT_WITH) for member in self.members) + '\n}'
         else:
             result += r' {}'
         return result
@@ -812,15 +999,16 @@ class AnnotationDeclaration(TypeDeclaration):
     def __str__(self):
         result = f"{self.doc_str()}{self.anno_str()}{self.mod_str()}@interface {self.name}"
         if self.members:
-            result += ' {\n' + '\n'.join(indent(str(member), '\t') for member in self.members) + '\n}'
+            result += ' {\n' + '\n'.join(indent(str(member), INDENT_WITH) for member in self.members) + '\n}'
         else:
             result += r' {}'
         return result
 
 class EnumDeclaration(TypeDeclaration):
-    def __init__(self, *, name, interfaces=[], fields=[], members=[], doc=None, annotations=[], modifiers=[], parent=None):
-        listtypecheck(interfaces, list, GenericType, function='EnumDeclaration')
-        listtypecheck(fields, list, EnumField, function='EnumDeclaration')
+    def __init__(self, *, name, interfaces: List['GenericType']=[], fields: List['EnumField']=[], members=[], doc=None, annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('interfaces', interfaces, List[GenericType])
+        # check_type('fields', fields, List[EnumField])
 
         super().__init__(name=name, members=members, doc=doc, annotations=annotations, modifiers=modifiers, parent=parent)
 
@@ -836,9 +1024,9 @@ class EnumDeclaration(TypeDeclaration):
             result += ' implements ' + ', '.join(str(interface) for interface in self.interfaces)
         body = ""
         if self.fields:
-            body += ',\n'.join(indent(str(field), '\t') for field in self.fields)
+            body += ',\n'.join(indent(str(field), INDENT_WITH) for field in self.fields)
         if self.members:
-            body += ';\n' + '\n'.join(indent(str(member), '\t') for member in self.members)
+            body += ';\n' + '\n'.join(indent(str(member), INDENT_WITH) for member in self.members)
         if body:
             result += ' {\n' + body + '\n}'
         else:
@@ -848,8 +1036,9 @@ class EnumDeclaration(TypeDeclaration):
 class Modifier(Node):
     VALUES = {'public', 'private', 'protected', 'static', 'native', 'final', 'abstract', 'synchronized', 'strictfp', 'transient', 'volatile', 'default'}
 
-    def __init__(self, value, parent=None):
-        typecheck(value, str, function='Modifier')
+    def __init__(self, value: str, parent=None):
+        assert check_argument_types()
+        # check_type('value', value, str)
         if value not in Modifier.VALUES:
             raise ValueError(f'not a modifier: {value!r}')
 
@@ -873,9 +1062,10 @@ class Modifier(Node):
         return isinstance(other, Modifier) and str(self) == str(other) or str(self) == other
 
 class EnumField(Node, Named, Member, Annotated):
-    def __init__(self, name, args=None, members=None, doc=None, annotations=[], parent=None):
-        listtypecheck(args, (NoneType, list), Expression, function='EnumField')
-        listtypecheck(members, (NoneType, list), Member, function='EnumField')
+    def __init__(self, name, args: Optional[List['Expression']]=None, members: Optional[List[Member]]=None, doc=None, annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('args', args, Optional[List[Expression]])
+        # check_type('members', members, Optional[List[Member]])
 
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -894,15 +1084,16 @@ class EnumField(Node, Named, Member, Annotated):
             result += '(' + ', '.join(str(arg) for arg in self.args) + ')'
         if self.members is not None:
             if self.members:
-                result += ' {\n' + '\n'.join(indent(str(member), '\t') for member in self.members) + '\n}'
+                result += ' {\n' + '\n'.join(indent(str(member), INDENT_WITH) for member in self.members) + '\n}'
             else:
                 result += r' {}'
         return result
 
 class VariableDeclaration(Statement, Documented, Declaration):
-    def __init__(self, *, type, declarators, doc=None, annotations=[], modifiers=[], parent=None):
-        typecheck(type, Type, function=typename(self))
-        listtypecheck(declarators, list, VariableDeclarator, function=typename(self))
+    def __init__(self, *, type: 'Type', declarators: List['VariableDeclarator'], doc=None, annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('declarators', declarators, List[VariableDeclarator])
         if len(declarators) == 0:
             raise ValueError(f"{typename(self)}() given empty declarator list")
 
@@ -923,8 +1114,9 @@ class VariableDeclaration(Statement, Documented, Declaration):
         return f"{self.doc_str(newlines)}{self.anno_str(newlines)}{self.mod_str()}{self.type} {', '.join(str(decl) for decl in self.declarators)};"
 
 class VariableDeclarator(Node, Named, Dimension):
-    def __init__(self, *, name, dimensions=[], init=None, parent=None):
-        typecheck(init, (NoneType, Initializer), function=typename(self))
+    def __init__(self, *, name, dimensions=[], init: Optional['Initializer']=None, parent=None):
+        assert check_argument_types()
+        # check_type('init', init, Optional[Initializer])
 
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -942,16 +1134,17 @@ class VariableDeclarator(Node, Named, Dimension):
         return result
 
 class FunctionDeclaration(Named, Member, GenericDeclaration, Node):
-    def __init__(self, *, name, return_type, params, typeparams=[], throws=[], body, doc=None, modifiers=[], annotations=[], parent=None):
-        typecheck(return_type, Type, function='FunctionDeclaration')
-        typecheck(params, list, function='FunctionDeclaration')
+    def __init__(self, *, name, return_type: 'Type', params: list, typeparams=[], throws: List['GenericType']=[], body: Optional['Block']=None, doc=None, modifiers=[], annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('return_type', return_type, Type)
+        # check_type('params', params, list)
         if len(params) > 0 and isinstance(params[0], ThisParameter):
             if len(params) > 1:
-                itertypecheck(params[1:], FormalParameter, function='FunctionDeclaration')
+                check_type('params', params[1:], List[FormalParameter])
         else:
-            itertypecheck(params, FormalParameter, function='FunctionDeclaration')
-        listtypecheck(throws, list, GenericType, function='FunctionDeclaration')
-        typecheck(body, (NoneType, Block), function='FunctionDeclaration')
+            check_type('params', params, List[FormalParameter])
+        # check_type('throws', throws, List[GenericType])
+        # check_type('body', body, Optional[Block])
         
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -967,9 +1160,13 @@ class FunctionDeclaration(Named, Member, GenericDeclaration, Node):
     def accept(self, visitor, value):
         return visitor.visit_function_declaration(self, value)
 
-    def __str__(self):
-        result = f"{self.doc_str()}{self.anno_str()}{self.mod_str()}{self.typeparams_str()}{self.return_type} {self.name}" \
+    @property
+    def header(self) -> str:
+        return f"{self.doc_str()}{self.anno_str()}{self.mod_str()}{self.typeparams_str()}{self.return_type} {self.name}" \
                  f"({', '.join(str(param) for param in self.params)})"
+
+    def __str__(self):
+        result = self.header
         if self.throws:
             result += " throws " + ', '.join(str(exception) for exception in self.throws)
         if self.body:
@@ -979,15 +1176,16 @@ class FunctionDeclaration(Named, Member, GenericDeclaration, Node):
         return result
 
 class ConstructorDeclaration(Named, Member, GenericDeclaration, Node):
-    def __init__(self, *, name, params, typeparams=[], throws=[], body, doc=None, modifiers=[], annotations=[], parent=None):
-        typecheck(params, list, function='FunctionDeclaration')
+    def __init__(self, *, name, params: list, typeparams=[], throws: List['GenericType']=[], body: Optional['Block']=None, doc=None, modifiers=[], annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('params', params, list)
         if len(params) > 0 and isinstance(params[0], ThisParameter):
             if len(params) > 1:
-                itertypecheck(params[1:], FormalParameter, function='FunctionDeclaration')
+                check_type('params', params[1:], List[FormalParameter])
         else:
-            itertypecheck(params, FormalParameter, function='FunctionDeclaration')
-        listtypecheck(throws, list, GenericType, function='FunctionDeclaration')
-        typecheck(body, (NoneType, Block), function='FunctionDeclaration')
+            check_type('params', params, List[FormalParameter])
+        # check_type('throws', throws, List[GenericType])
+        # check_type('body', body, Optional[Block])
         
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -1002,9 +1200,13 @@ class ConstructorDeclaration(Named, Member, GenericDeclaration, Node):
     def accept(self, visitor, value):
         return visitor.visit_constructor_declaration(self, value)
 
-    def __str__(self):
-        result = f"{self.doc_str()}{self.anno_str()}{self.mod_str()}{self.typeparams_str()}{self.name}" \
+    @property
+    def header(self):
+        return f"{self.doc_str()}{self.anno_str()}{self.mod_str()}{self.typeparams_str()}{self.name}" \
                  f"({', '.join(str(param) for param in self.params)})"
+
+    def __str__(self):
+        result = self.header
         if self.throws:
             result += " throws " + ', '.join(str(exception) for exception in self.throws)
         if self.body:
@@ -1014,9 +1216,10 @@ class ConstructorDeclaration(Named, Member, GenericDeclaration, Node):
         return result
 
 class AnnotationProperty(Named, Declaration, Member, Dimension, Node):
-    def __init__(self, *, type, name, default=None, dimensions=[], doc=None, annotations=[], modifiers=[], parent=None):
-        typecheck(type, Type, function='AnnotationProperty')
-        typecheck(default, (AnnotationValue, NoneType), function='AnnotationProperty')
+    def __init__(self, *, type: 'Type', name, default: Optional['AnnotationValue']=None, dimensions=[], doc=None, annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('default', default, Optional[AnnotationValue])
 
         Node.__init__(self, parent)
         Declaration.__init__(self, modifiers, annotations)
@@ -1038,8 +1241,10 @@ class AnnotationProperty(Named, Declaration, Member, Dimension, Node):
         return result
 
 class FormalParameter(Named, Declaration, Dimension, Node):
-    def __init__(self, *, name, type, dimensions=[], annotations=[], modifiers=[], parent=None):
-        typecheck(type, Type, function=typename(self))
+    def __init__(self, *, name, type: 'Type', variadic: bool=False, dimensions=[], annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('variadic', variadic, bool)
 
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -1047,17 +1252,19 @@ class FormalParameter(Named, Declaration, Dimension, Node):
         Dimension.__init__(self, dimensions)
 
         self.type: Type = type
+        self.variadic: bool = variadic
 
     def accept(self, visitor, value):
         return visitor.visit_formal_parameter(self, value)
 
     def __str__(self):
-        return f"{self.anno_str(newlines=False)}{self.mod_str()}{self.type} {self.name}{self.dim_str()}"
+        return f"{self.anno_str(newlines=False)}{self.mod_str()}{self.type}{'...' if self.variadic else ''} {self.name}{self.dim_str()}"
 
 class ThisParameter(Annotated, Node):
-    def __init__(self, *, type, qualifier=None, annotations=[], parent=None):
-        typecheck(type, Type, function='ThisParameter')
-        typecheck(qualifier, (NoneType, Name), function='ThisParameter')
+    def __init__(self, *, type: 'Type', qualifier: Optional[Name]=None, annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('qualifier', qualifier, Optional[Name])
 
         Node.__init__(self, parent)
         Annotated.__init__(self, annotations)
@@ -1076,9 +1283,10 @@ class ThisParameter(Annotated, Node):
         return result
 
 class InitializerBlock(Member, Node):
-    def __init__(self, *, body, static, doc=None, parent=None):
-        typecheck(body, Block, function='InitializerBlock')
-        typecheck(static, bool, function='InitializerBlock')
+    def __init__(self, *, body: 'Block', static: bool, doc=None, parent=None):
+        assert check_argument_types()
+        # check_type('body', body, Block)
+        # check_type('static', static, bool)
 
         Node.__init__(self, parent)
         Member.__init__(self, doc)
@@ -1096,9 +1304,10 @@ class InitializerBlock(Member, Node):
             return f"{self.doc_str()}{self.body}"
 
 class FieldDeclaration(Declaration, Member, Node):
-    def __init__(self, *, type, declarators, doc=None, annotations=[], modifiers=[], parent=None):
-        typecheck(type, Type, function=typename(self))
-        listtypecheck(declarators, list, VariableDeclarator, function=typename(self))
+    def __init__(self, *, type: 'Type', declarators: List[VariableDeclarator], doc=None, annotations=[], modifiers=[], parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('declarators', declarators, List[VariableDeclarator])
         if len(declarators) == 0:
             raise ValueError(f"{typename(self)}() given empty declarator list")
 
@@ -1116,15 +1325,16 @@ class FieldDeclaration(Declaration, Member, Node):
         return f"{self.doc_str()}{self.anno_str()}{self.mod_str()}{self.type} {', '.join(str(decl) for decl in self.declarators)};"
 
 class TypeArgument(Node, Annotated):
-    def __init__(self, *, base=None, bound=None, annotations=[], parent=None):
-        typecheck(base, (NoneType, GenericType, ArrayType, TypeUnion), function='TypeArgument')
+    def __init__(self, *, base: Optional[Union['GenericType', 'ArrayType', 'TypeUnion']]=None, bound=None, annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('base', base, Optional[Union[GenericType, ArrayType, TypeUnion]])
         if base:
-            typecheck(bound, str, function='TypeArgument')
+            check_type('bound', bound, str)
             if bound != 'extends' and bound != 'super':
                 raise ValueError(f'TypeArgument() invalid bound')
         else:
             if bound is not None:
-                raise ValueError(f"TypeArgument() bound may not be given if base is not given")
+                raise ValueError(f"bound may not be given if base is not given")
             
         Node.__init__(self, parent)
         Annotated.__init__(self, annotations)
@@ -1142,8 +1352,9 @@ class TypeArgument(Node, Annotated):
         return result
 
 class TypeParameter(Node, Named, Annotated):
-    def __init__(self, name, *, bound=None, annotations=[], parent=None):
-        typecheck(bound, (NoneType, GenericType, ArrayType, TypeUnion), function='TypeParameter')
+    def __init__(self, name, *, bound: Optional[Union['GenericType', 'ArrayType', 'TypeUnion']]=None, annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('bound', bound, Optional[Union[GenericType, ArrayType, TypeUnion]])
 
         Node.__init__(self, parent)
         Annotated.__init__(self, annotations)
@@ -1171,8 +1382,9 @@ class Type(Node, Annotated):
 class PrimitiveType(Type):
     VALUES = {'boolean', 'byte', 'short', 'char', 'int', 'long', 'float', 'double'}
 
-    def __init__(self, name, *, annotations=[], parent=None):
-        typecheck(name, str, function='PrimitiveType')
+    def __init__(self, name: str, *, annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('name', name, str)
         if name not in PrimitiveType.VALUES:
             raise ValueError(f'PrimitiveType() not a primitive type: {name!r}')
 
@@ -1202,8 +1414,9 @@ class VoidType(Type):
         return self.anno_str(newlines=False) + 'void'
 
 class ArrayType(Type, Dimension):
-    def __init__(self, base, dimensions=None, *, annotations=[], parent=None):
-        typecheck(base, (PrimitiveType, GenericType), function=typename(self))
+    def __init__(self, base: Union[PrimitiveType, 'GenericType'], dimensions=None, *, annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('base', base, Union[PrimitiveType, GenericType])
 
         Type.__init__(self, annotations, parent)
         Dimension.__init__(self, dimensions or [None])
@@ -1223,10 +1436,11 @@ class ArrayType(Type, Dimension):
         return f"{self.anno_str(newlines=False)}{self.base}{self.dim_str()}"
 
 class GenericType(Type):
-    def __init__(self, name, *, typeargs=None, container=None, annotations=[], parent=None):
-        typecheck(name, Name, function='GenericType')
-        listtypecheck(typeargs, (NoneType, list), (GenericType, ArrayType, TypeArgument), function='GenericType')
-        typecheck(container, (NoneType, GenericType), function='GenericType')
+    def __init__(self, name: Name, *, typeargs: Optional[List[Union['GenericType', ArrayType, TypeArgument]]]=None, container: Optional['GenericType']=None, annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('name', name, Name)
+        # check_type('typeargs', typeargs, Optional[List[Union[GenericType, ArrayType, TypeArgument]]])
+        # check_type('container', container, Optional[GenericType])
 
         super().__init__(annotations, parent)
 
@@ -1263,13 +1477,13 @@ class GenericType(Type):
 
 class TypeUnion(Type):
     def __init__(self, *types, parent=None):
+        check_type('types', types, Union[Tuple[List[Union[GenericType, ArrayType]]], Tuple[Union[GenericType, ArrayType], ...]])
         if len(types) == 1 and isinstance(types[0], list):
             types = types[0]
         else:
             types = list(types)
         if len(types) == 0:
             raise ValueError('TypeUnion() no types given')
-        listtypecheck(types, list, (GenericType, ArrayType), function='TypeUnion')
 
         super().__init__(parent=parent)
 
@@ -1287,13 +1501,13 @@ class TypeUnion(Type):
 
 class TypeIntersection(Type):
     def __init__(self, *types, parent=None):
+        check_type('types', types, Union[Tuple[List[GenericType]], Tuple[GenericType, ...]])
         if len(types) == 1 and isinstance(types[0], list):
             types = types[0]
         else:
             types = list(types)
         if len(types) == 0:
             raise ValueError('TypeIntersection() no types given')
-        listtypecheck(types, list, GenericType, function='TypeIntersection')
 
         super().__init__(parent=parent)
 
@@ -1312,16 +1526,15 @@ class TypeIntersection(Type):
 class AnnotationValue(Node): pass
 
 class Annotation(AnnotationValue):
-    def __init__(self, type, *, args=None, parent=None):
-        typecheck(type, GenericType, function='Annotation')
-        typecheck(args, (NoneType, AnnotationValue, list), function='Annotation')
-        if isinstance(args, list):
-            itertypecheck(args, AnnotationArgument, function='Annotation')
+    def __init__(self, type: GenericType, *, args: Optional[Union[AnnotationValue, List['AnnotationArgument']]]=None, parent=None):
+        assert check_argument_types()
+        # check_type('type', type, GenericType)
+        # check_type('args', args, Optional[Union[AnnotationValue, List[AnnotationArgument]]])
 
         super().__init__(parent)
 
         self.type: GenericType = type
-        self.args: List[AnnotationValue] = args
+        self.args: Union[AnnotationValue, List[AnnotationArgument]] = args
 
     def accept(self, visitor, value):
         return visitor.visit_annotation(self, value)
@@ -1336,8 +1549,9 @@ class Annotation(AnnotationValue):
         return result
 
 class AnnotationArgument(Node, Named):
-    def __init__(self, name, value, *, parent=None):
-        typecheck(value, AnnotationValue, function='AnnotationArgument')
+    def __init__(self, name, value: 'AnnotationValue', *, parent=None):
+        assert check_argument_types()
+        # check_type('value', value, AnnotationValue)
 
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -1353,8 +1567,9 @@ class AnnotationArgument(Node, Named):
 class Initializer(AnnotationValue): pass
 
 class ArrayInitializer(Initializer):
-    def __init__(self, values, *, parent=None):
-        listtypecheck(values, list, AnnotationValue, function=typename(self))
+    def __init__(self, values: List['AnnotationValue'], *, parent=None):
+        assert check_argument_types()
+        # check_type('values', values, List[AnnotationValue])
 
         super().__init__(parent)
 
@@ -1372,12 +1587,13 @@ class BinaryExpression(Expression):
     OPS = {'+', '-', '*', '/', '%', '^', '&', '|', '&&', '||', '<', '>', '==', '!=',
               '<=', '>=', '<<', '>>', '>>>'}
 
-    def __init__(self, *, op, lhs, rhs, parent=None):
-        typecheck(op, str, function='BinaryExpression')
+    def __init__(self, *, op: str, lhs: Expression, rhs: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('op', op, str)
         if op not in BinaryExpression.OPS:
             raise ValueError(f'BinaryExpression() invalid operator')
-        typecheck(lhs, Expression, function='BinaryExpression')
-        typecheck(rhs, Expression, function='BinaryExpression')
+        # check_type('lhs', lhs, Expression)
+        # check_type('rhs', rhs, Expression)
 
         super().__init__(parent)
 
@@ -1394,11 +1610,12 @@ class BinaryExpression(Expression):
 class UnaryExpression(Expression):
     OPS = {'!', '~', '+', '-'}
 
-    def __init__(self, *, op, expr, parent=None):
-        typecheck(op, str, function='UnaryExpression')
+    def __init__(self, *, op: str, expr: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('op', op, str)
         if op not in UnaryExpression.OPS:
             raise ValueError("UnaryExpression() invalid operator")
-        typecheck(expr, Expression, function='UnaryExpression')
+        # check_type('expr', expr, Expression)
 
         super().__init__(parent)
 
@@ -1412,10 +1629,11 @@ class UnaryExpression(Expression):
         return f"{self.op}{self.expr}"
 
 class ConditionalExpression(Expression):
-    def __init__(self, *, condition, truepart, falsepart, parent=None):
-        typecheck(condition, Expression, function='ConditionalExpression')
-        typecheck(truepart, Expression, function='ConditionalExpression')
-        typecheck(falsepart, Expression, function='ConditionalExpression')
+    def __init__(self, *, condition: Expression, truepart: Expression, falsepart: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('condition', condition, Expression)
+        # check_type('truepart', truepart, Expression)
+        # check_type('falsepart', falsepart, Expression)
 
         super().__init__(parent)
 
@@ -1430,12 +1648,13 @@ class ConditionalExpression(Expression):
         return f"{self.condition}? {self.truepart} : {self.falsepart}"
 
 class IncrementExpression(Expression):
-    def __init__(self, *, op, expr, prefix, parent=None):
-        typecheck(op, str, function='IncrementExpression')
+    def __init__(self, *, op: str, expr: Expression, prefix: bool, parent=None):
+        assert check_argument_types()
+        # check_type('op', op, str)
         if op != '++' and op != '--':
             raise ValueError('IncrementExpression() invalid operator')
-        typecheck(expr, Expression, function='IncrementExpression')
-        typecheck(prefix, bool, function='IncrementExpression')
+        # check_type('expr', expr, Expression)
+        # check_type('prefix', prefix, bool)
 
         super().__init__(parent)
 
@@ -1453,9 +1672,10 @@ class IncrementExpression(Expression):
             return f"{self.expr}{self.op}"
 
 class IndexExpression(Expression):
-    def __init__(self, *, indexed, index, parent=None):
-        typecheck(indexed, Expression, function='IndexExpression')
-        typecheck(index, Expression, function='IndexExpression')
+    def __init__(self, *, indexed: Expression, index: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('indexed', indexed, Expression)
+        # check_type('index', index, Expression)
 
         super().__init__(parent)
 
@@ -1469,9 +1689,10 @@ class IndexExpression(Expression):
         return f"{self.indexed}[{self.index}]"
 
 class CastExpression(Expression):
-    def __init__(self, *, type, expr, parent=None):
-        typecheck(type, Type, function='CastExpression')
-        typecheck(expr, Expression, function='CastExpression')
+    def __init__(self, *, type: Type, expr: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('expr', expr, Expression)
 
         super().__init__(parent)
 
@@ -1487,12 +1708,13 @@ class CastExpression(Expression):
 class Assignment(Expression):
     OPS = {'=', '+=', '-=', '*=', '/=', '%=', '^=', '&=', '|=', '<<=', '>>=', '>>>='}
 
-    def __init__(self, *, op, lhs, rhs, parent=None):
-        typecheck(op, str, function='Assignment')
+    def __init__(self, *, op: str, lhs: Expression, rhs: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('op', op, str)
         if op not in Assignment.OPS:
             raise ValueError('Assignment() invalid operator')
-        typecheck(lhs, Expression, function='Assignment')
-        typecheck(rhs, Expression, function='Assignment')
+        # check_type('lhs', lhs, Expression)
+        # check_type('rhs', rhs, Expression)
 
         super().__init__(parent)
 
@@ -1507,9 +1729,10 @@ class Assignment(Expression):
         return f"{self.lhs} {self.op} {self.rhs}"
 
 class MemberAccess(Expression):
-    def __init__(self, *, object=None, name, parent=None):
-        typecheck(object, (NoneType, Expression), function='MemberAccess')
-        typecheck(name, Name, function='MemberAccess')
+    def __init__(self, *, object: Optional[Expression]=None, name: Name, parent=None):
+        assert check_argument_types()
+        # check_type('object', object, Optional[Expression])
+        # check_type('name', name, Name)
 
         super().__init__(parent)
 
@@ -1534,11 +1757,12 @@ class MemberAccess(Expression):
             return str(self.name)
 
 class FunctionCall(Expression):
-    def __init__(self, *, object=None, name, args=[], typeargs=[], parent=None):
-        typecheck(object, (NoneType, Expression), function='FunctionCall')
-        typecheck(name, Name, function='FunctionCall')
-        listtypecheck(args, list, Expression, function='FunctionCall')
-        listtypecheck(typeargs, list, (GenericType, ArrayType, TypeArgument), function='FunctionCall')
+    def __init__(self, *, object: Optional[Expression]=None, name: Name, args: List[Expression]=[], typeargs: List[Union[GenericType, ArrayType, TypeArgument]]=[], parent=None):
+        assert check_argument_types()
+        # check_type('object', object, Optional[Expression])
+        # check_type('name', name, Name)
+        # check_type('args', args, List[Expression])
+        # check_type('typeargs', typeargs, List[Union[GenericType, ArrayType, TypeArgument]])
 
         super().__init__(parent)
 
@@ -1569,10 +1793,11 @@ class FunctionCall(Expression):
         return result
 
 class ThisCall(Expression):
-    def __init__(self, *, object=None, args=[], typeargs=[], parent=None):
-        typecheck(object, (NoneType, Expression), function='FunctionCall')
-        listtypecheck(args, list, Expression, function='FunctionCall')
-        listtypecheck(typeargs, list, (GenericType, ArrayType, TypeArgument), function='FunctionCall')
+    def __init__(self, *, object: Optional[Expression]=None, args: List[Expression]=[], typeargs: List[Union[GenericType, ArrayType, TypeArgument]]=[], parent=None):
+        assert check_argument_types()
+        # check_type('object', object, Optional[Expression])
+        # check_type('args', args, List[Expression])
+        # check_type('typeargs', typeargs, List[Union[GenericType, ArrayType, TypeArgument]])
 
         super().__init__(parent)
 
@@ -1598,10 +1823,11 @@ class ThisCall(Expression):
         return result
 
 class SuperCall(Expression):
-    def __init__(self, *, object=None, args=[], typeargs=[], parent=None):
-        typecheck(object, (NoneType, Expression), function='FunctionCall')
-        listtypecheck(args, list, Expression, function='FunctionCall')
-        listtypecheck(typeargs, list, (GenericType, ArrayType, TypeArgument), function='FunctionCall')
+    def __init__(self, *, object: Optional[Expression]=None, args: List[Expression]=[], typeargs: List[Union[GenericType, ArrayType, TypeArgument]]=[], parent=None):
+        assert check_argument_types()
+        # check_type('object', object, Optional[Expression])
+        # check_type('args', args, List[Expression])
+        # check_type('typeargs', typeargs, List[Union[GenericType, ArrayType, TypeArgument]])
 
         super().__init__(parent)
 
@@ -1627,8 +1853,9 @@ class SuperCall(Expression):
         return result
 
 class Literal(Expression):
-    def __init__(self, value, *, parent=None):
-        typecheck(value, str, function='Literal')
+    def __init__(self, value: str, *, parent=None):
+        assert check_argument_types()
+        # check_type('value', value, str)
 
         super().__init__(parent)
 
@@ -1722,8 +1949,9 @@ class NullLiteral(Expression):
         return 'null'
 
 class TypeLiteral(Expression):
-    def __init__(self, type, *, parent=None):
-        typecheck(type, Type, function='TypeLiteral')
+    def __init__(self, type: Type, *, parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
 
         super().__init__(parent)
 
@@ -1736,12 +1964,13 @@ class TypeLiteral(Expression):
         return f"{self.type}.class"
 
 class ClassCreator(Expression):
-    def __init__(self, *, type, object=None, args=[], typeargs=[], members=None, parent=None):
-        typecheck(type, Type, function='ClassCreator')
-        typecheck(object, (NoneType, Expression), function='ClassCreator')
-        listtypecheck(args, list, Expression, function='ClassCreator')
-        listtypecheck(typeargs, list, (GenericType, ArrayType, TypeArgument), function='ClassCreator')
-        listtypecheck(members, (NoneType, list), Member, function='ClassCreator')
+    def __init__(self, *, type: GenericType, object: Optional[Expression]=None, args: List[Expression]=[], typeargs: List[Union[GenericType, ArrayType, TypeArgument]]=[], members: Optional[List[Member]]=None, parent=None):
+        assert check_argument_types()
+        # check_type('type', type, GenericType)
+        # check_type('object', object, Optional[Expression])
+        # check_type('args', args, List[Expression])
+        # check_type('typeargs', typeargs, List[Union[GenericType, ArrayType, TypeArgument]])
+        # check_type('members', members, Optional[List[Member]])
         
         super().__init__(parent)
 
@@ -1761,7 +1990,7 @@ class ClassCreator(Expression):
         result += str(self.type) + '(' + ', '.join(str(arg) for arg in self.args) + ')'
         if self.members is not None:
             if self.members:
-                result += ' {\n' + '\n'.join(indent(str(member), '\t') for member in self.members) + '\n}'
+                result += ' {\n' + '\n'.join(indent(str(member), INDENT_WITH) for member in self.members) + '\n}'
             else:
                 result += r' {}'
         if self.object:
@@ -1769,10 +1998,11 @@ class ClassCreator(Expression):
         return result
 
 class ArrayCreator(Expression):
-    def __init__(self, *, type, dimensions, initializer=None, parent=None):
-        typecheck(type, Type, function='ArrayCreator')
-        listtypecheck(dimensions, list, DimensionExpression, function='ArrayCreator')
-        typecheck(initializer, (NoneType, ArrayInitializer), function='ArrayCreator')
+    def __init__(self, *, type: Type, dimensions: List['DimensionExpression'], initializer: Optional[ArrayInitializer]=None, parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('dimensions', dimensions, List[DimensionExpression])
+        # check_type('initializer', initializer, Optional[ArrayInitializer])
         if len(dimensions) == 0:
             raise ValueError(f'ArrayCreator() invalid dimensions')
 
@@ -1792,8 +2022,9 @@ class ArrayCreator(Expression):
         return result
 
 class DimensionExpression(Node, Annotated):
-    def __init__(self, *, annotations=[], size=None, parent=None):
-        typecheck(size, (NoneType, Expression), function='DimensionExpression')
+    def __init__(self, *, annotations=[], size: Optional[Expression]=None, parent=None):
+        assert check_argument_types()
+        # check_type('size', size, Optional[Expression])
 
         Node.__init__(self, parent)
         Annotated.__init__(self, annotations)
@@ -1814,17 +2045,18 @@ class DimensionExpression(Node, Annotated):
         return result
 
 class MethodReference(Expression):
-    def __init__(self, *, name, object, parent=None):
+    def __init__(self, *, name, object: Union[Expression, GenericType, ArrayType], parent=None):
+        assert check_argument_types()
         if isinstance(name, str):
             if name != 'new':
                 raise ValueError('MethodReference() invalid name')
         else:
-            typecheck(name, Name, function='MethodReference')
-        typecheck(object, (Expression, GenericType, ArrayType), function='MethodReference')
+            check_type('name', name, Name)
+        # check_type('object', object, Union[Expression, GenericType, ArrayType])
 
         super().__init__(parent)
 
-        self.name: Name = name
+        self.name: Union[str, Name] = name
         self.object = object
 
     def accept(self, visitor, value):
@@ -1834,9 +2066,10 @@ class MethodReference(Expression):
         return f"{self.object}::{self.name}"
 
 class TypeTest(Expression):
-    def __init__(self, *, type, expr, parent=None):
-        typecheck(type, Type, function='TypeTest')
-        typecheck(expr, Expression, function='TypeTest')
+    def __init__(self, *, type: Type, expr: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('expr', expr, Expression)
 
         super().__init__(parent)
 
@@ -1850,8 +2083,9 @@ class TypeTest(Expression):
         return f"{self.expr} instanceof {self.type}"
 
 class Parenthesis(Expression):
-    def __init__(self, expr, *, parent=None):
-        typecheck(expr, Expression, function='Parenthesis')
+    def __init__(self, expr: Expression, *, parent=None):
+        assert check_argument_types()
+        # check_type('expr', expr, Expression)
 
         super().__init__(parent)
 
@@ -1864,8 +2098,9 @@ class Parenthesis(Expression):
         return f"({self.expr})"
 
 class This(Expression):
-    def __init__(self, *, object=None, parent=None):
-        typecheck(object, (NoneType, Expression), function='This')
+    def __init__(self, *, object: Optional[Expression]=None, parent=None):
+        assert check_argument_types()
+        # check_type('object', object, Optional[Expression])
 
         super().__init__(parent)
 
@@ -1881,8 +2116,9 @@ class This(Expression):
             return 'this'
 
 class Super(Expression):
-    def __init__(self, *, object=None, parent=None):
-        typecheck(object, (NoneType, Expression), function='Super')
+    def __init__(self, *, object: Optional[Expression]=None, parent=None):
+        assert check_argument_types()
+        # check_type('object', object, Optional[Expression])
 
         super().__init__(parent)
 
@@ -1898,14 +2134,10 @@ class Super(Expression):
             return 'super'
 
 class Lambda(Expression):
-    def __init__(self, *, params, body, parent=None):
-        typecheck(params, list, function='Lambda')
-        if len(params) != 0:
-            if isinstance(params[0], Name):
-                itertypecheck(params, Name, function='Lambda')
-            else:
-                itertypecheck(params, FormalParameter, function='Lambda')
-        typecheck(body, (Block, Expression), function='Lambda')
+    def __init__(self, *, params: Union[List[Name], List[FormalParameter]], body: Union['Block', Expression], parent=None):
+        assert check_argument_types()
+        # check_type('params', params, Union[List[Name], List[FormalParameter]])
+        # check_type('body', body, Union[Block, Expression])
 
         super().__init__(parent)
 
@@ -1924,8 +2156,9 @@ class Lambda(Expression):
         return result
 
 class ExpressionStatement(Statement):
-    def __init__(self, expr, *, parent=None):
-        typecheck(expr, Expression, function='ExpressionStatement')
+    def __init__(self, expr: Expression, *, parent=None):
+        assert check_argument_types()
+        # check_type('expr', expr, Expression)
 
         super().__init__(parent)
 
@@ -1945,9 +2178,10 @@ class EmptyStatement(Statement):
         return ';'
 
 class LabeledStatement(Statement):
-    def __init__(self, *, label, stmt, parent=None):
-        typecheck(label, Name, function='LabeledStatement')
-        typecheck(stmt, Statement, function='LabeledStatement')
+    def __init__(self, *, label: Name, stmt: Statement, parent=None):
+        assert check_argument_types()
+        # check_type('label', label, Name)
+        # check_type('stmt', stmt, Statement)
 
         super().__init__(parent)
 
@@ -1967,13 +2201,14 @@ def format_body(body, newline_in_empty_body=False):
         else:
             return ' ' + str(body)
     else:
-        return '\n' + indent(str(body), '\t')
+        return '\n' + indent(str(body), INDENT_WITH)
 
 class IfStatement(Statement):
-    def __init__(self, *, condition, body, elsebody=None, parent=None):
-        typecheck(condition, Expression, function='IfStatement')
-        typecheck(body, Block, function='IfStatement')
-        typecheck(elsebody, (NoneType, Block, IfStatement), function='IfStatement')
+    def __init__(self, *, condition: Expression, body: Statement, elsebody: Optional[Statement]=None, parent=None):
+        assert check_argument_types()
+        # check_type('condition', condition, Expression)
+        # check_type('body', body, Statement)
+        # check_type('elsebody', elsebody, Optional[Statement])
 
         super().__init__(parent)
 
@@ -1998,8 +2233,9 @@ class IfStatement(Statement):
         return result
 
 class Block(Statement):
-    def __init__(self, stmts=[], *, parent=None):
-        listtypecheck(stmts, list, Statement, function='Block')
+    def __init__(self, stmts: List[Statement]=[], *, parent=None):
+        assert check_argument_types()
+        # check_type('stmts', stmts, List[Statement])
 
         super().__init__(parent)
 
@@ -2010,14 +2246,15 @@ class Block(Statement):
 
     def __str__(self):
         if self.stmts:
-            return '{\n' + '\n'.join(indent(str(stmt), '\t') for stmt in self.stmts) + '\n}'
+            return '{\n' + '\n'.join(indent(str(stmt), INDENT_WITH) for stmt in self.stmts) + '\n}'
         else:
             return r'{}'
         
 class Switch(Statement, Expression):
-    def __init__(self, *, condition, cases, parent=None):
-        typecheck(condition, Expression, function='SwitchStatement')
-        listtypecheck(cases, list, SwitchCase, function='SwitchStatement')
+    def __init__(self, *, condition: Expression, cases: List['SwitchCase'], parent=None):
+        assert check_argument_types()
+        # check_type('condition', condition, Expression)
+        # check_type('cases', cases, List[SwitchCase])
 
         super().__init__(parent)
 
@@ -2030,21 +2267,22 @@ class Switch(Statement, Expression):
     def __str__(self):
         result = f"switch({self.condition}) {{"
         if self.cases:
-            result += '\n' + '\n'.join(indent(str(case), '\t') for case in self.cases) + '\n}'
+            result += '\n' + '\n'.join(indent(str(case), INDENT_WITH) for case in self.cases) + '\n}'
         else:
             result += '}'
         return result
 
 class SwitchCase(Node):
-    def __init__(self, *, labels=None, stmts, arrow=False, parent=None):
-        listtypecheck(labels, (NoneType, list), (Name, Expression), function='SwitchCase')
-        listtypecheck(stmts, list, Statement, function='SwitchCase')
-        typecheck(arrow, bool, function='SwitchCase')
+    def __init__(self, *, labels: Optional[List[Union[Name, Expression]]]=None, stmts: List[Statement], arrow: bool=False, parent=None):
+        assert check_argument_types()
+        # check_type('labels', labels, Optional[List[Union[Name, Expression]]])
+        # check_type('stmts', stmts, List[Statement])
+        # check_type('arrow', arrow, bool)
 
         if arrow:
             if len(stmts) != 1:
                 raise ValueError('SwitchCase() arrow switch case can only have 1 body statement')
-            typecheck(stmts[0], (ExpressionStatement, Block, ThrowStatement), function=typename(self))
+            check_type('stmts[0]', stmts[0], Union[ExpressionStatement, Block, ThrowStatement])
 
         super().__init__(parent)
 
@@ -2077,13 +2315,14 @@ class SwitchCase(Node):
             elif len(self.stmts) == 1:
                 result += format_body(self.stmts[0], newline_in_empty_body=True)
             else:
-                result += '\n' + '\n'.join(indent(str(stmt), '\t') for stmt in self.stmts)
+                result += '\n' + '\n'.join(indent(str(stmt), INDENT_WITH) for stmt in self.stmts)
         
         return result
 
 class ThrowStatement(Statement):
-    def __init__(self, error, *, parent=None):
-        typecheck(error, Expression, function='ThrowStatement')
+    def __init__(self, error: Expression, *, parent=None):
+        assert check_argument_types()
+        # check_type('error', error, Expression)
 
         super().__init__(parent)
 
@@ -2096,8 +2335,9 @@ class ThrowStatement(Statement):
         return f"throw {self.error};"
 
 class ReturnStatement(Statement):
-    def __init__(self, value=None, *, parent=None):
-        typecheck(value, (NoneType, Expression), function='ReturnStatement')
+    def __init__(self, value: Optional[Expression]=None, *, parent=None):
+        assert check_argument_types()
+        # check_type('value', value, Optional[Expression])
 
         super().__init__(parent)
 
@@ -2113,8 +2353,9 @@ class ReturnStatement(Statement):
             return 'return;'
 
 class BreakStatement(Statement):
-    def __init__(self, label=None, *, parent=None):
-        typecheck(label, (NoneType, Name), function='BreakStatement')
+    def __init__(self, label: Optional[Name]=None, *, parent=None):
+        assert check_argument_types()
+        # check_type('label', label, Optional[Name])
 
         super().__init__(parent)
 
@@ -2130,8 +2371,9 @@ class BreakStatement(Statement):
             return 'break;'
 
 class ContinueStatement(Statement):
-    def __init__(self, label=None, *, parent=None):
-        typecheck(label, (NoneType, Name), function='ContinueStatement')
+    def __init__(self, label: Optional[Name]=None, *, parent=None):
+        assert check_argument_types()
+        # check_type('label', label, Optional[Name])
 
         super().__init__(parent)
 
@@ -2149,8 +2391,9 @@ class ContinueStatement(Statement):
 class YieldStatement(Statement):
     KEYWORD = 'break'
 
-    def __init__(self, value, *, parent=None):
-        typecheck(value, Expression, function='YieldStatement')
+    def __init__(self, value: Expression, *, parent=None):
+        assert check_argument_types()
+        # check_type('value', value, Expression)
 
         super().__init__(parent)
 
@@ -2163,9 +2406,10 @@ class YieldStatement(Statement):
         return f"{YieldStatement.KEYWORD} {self.value};"
 
 class ForLoop(Statement):
-    def __init__(self, *, control, body, parent=None):
-        typecheck(control, (ForControl, EnhancedForControl), function='ForLoop')
-        typecheck(body, Statement, function='ForLoop')
+    def __init__(self, *, control: Union['ForControl', 'EnhancedForControl'], body: Statement, parent=None):
+        assert check_argument_types()
+        # check_type('control', control, Union[ForControl, EnhancedForControl])
+        # check_type('body', body, Statement)
 
         super().__init__(parent)
 
@@ -2179,10 +2423,11 @@ class ForLoop(Statement):
         return f"for({self.control}){format_body(self.body)}"
 
 class ForControl(Node):
-    def __init__(self, *, init=None, condition=None, update=[], parent=None):
-        typecheck(init, (NoneType, VariableDeclaration, ExpressionStatement), function=typename(self))
-        typecheck(condition, (NoneType, Expression), function=typename(self))
-        listtypecheck(update, list, Expression, function=typename(self))
+    def __init__(self, *, init: Optional[Union[VariableDeclaration, 'ExpressionStatement']]=None, condition: Optional[Expression]=None, update: List[Expression]=[], parent=None):
+        assert check_argument_types()
+        # check_type('init', init, Optional[Union[VariableDeclaration, ExpressionStatement]])
+        # check_type('condition', condition, Optional[Expression])
+        # check_type('update', update, List[Expression])
 
         super().__init__(parent)
 
@@ -2213,13 +2458,14 @@ class ForControl(Node):
         return result
 
 class EnhancedForControl(Node):
-    def __init__(self, *, var, iterable, parent=None):
-        typecheck(var, VariableDeclaration, function=typename(self))
+    def __init__(self, *, var: VariableDeclaration, iterable: Expression, parent=None):
+        assert check_argument_types()
+        # check_type('var', var, VariableDeclaration)
         if len(var.declarators) != 1:
-            raise ValueError('EnhancedForControl() too many declarators given')
+            raise ValueError('too many declarators given')
         if var.declarators[0].init:
-            raise ValueError('EnhancedForControl() declarator may not have initializer')
-        typecheck(iterable, Expression, function=typename(self))
+            raise ValueError('declarator may not have initializer')
+        # check_type('iterable', iterable, Expression)
 
         super().__init__(parent)
 
@@ -2235,9 +2481,10 @@ class EnhancedForControl(Node):
         return result
 
 class WhileLoop(Statement):
-    def __init__(self, *, condition, body, parent=None):
-        typecheck(condition, Expression, function='WhileLoop')
-        typecheck(body, Statement, function='WhileLoop')
+    def __init__(self, *, condition: Expression, body: Statement, parent=None):
+        assert check_argument_types()
+        # check_type('condition', condition, Expression)
+        # check_type('body', body, Statement)
 
         super().__init__(parent)
 
@@ -2251,9 +2498,10 @@ class WhileLoop(Statement):
         return f"while({self.condition}){format_body(self.body)}"
 
 class DoWhileLoop(Statement):
-    def __init__(self, *, condition, body, parent=None):
-        typecheck(condition, Expression, function='DoWhileLoop')
-        typecheck(body, Statement, function='DoWhileLoop')
+    def __init__(self, *, condition: Expression, body: Statement, parent=None):
+        assert check_argument_types()
+        # check_type('condition', condition, Expression)
+        # check_type('body', body, Statement)
 
         super().__init__(parent)
 
@@ -2267,12 +2515,13 @@ class DoWhileLoop(Statement):
         if isinstance(self.body, Block):
             return f"do{format_body(self.body, newline_in_empty_body=True)} while({self.condition});"
         else:
-            return "do\n" + indent(str(self.body), '\t') + "\nwhile({self.condition});"
+            return "do\n" + indent(str(self.body), INDENT_WITH) + "\nwhile({self.condition});"
 
 class SynchronizedBlock(Statement):
-    def __init__(self, *, lock, body, parent=None):
-        typecheck(lock, Expression, function='SynchronizedBlock')
-        typecheck(body, Block, function='SynchronizedBlock')
+    def __init__(self, *, lock: Expression, body: Block, parent=None):
+        assert check_argument_types()
+        # check_type('lock', lock, Expression)
+        # check_type('body', body, Block)
 
         super().__init__(parent)
 
@@ -2286,11 +2535,12 @@ class SynchronizedBlock(Statement):
         return f"synchronized({self.lock}) {self.body}"
 
 class TryStatement(Statement):
-    def __init__(self, *, resources=None, body, catches, finallybody=None, parent=None):
-        listtypecheck(resources, (NoneType, list), (TryResource, Expression), function='TryStatement')
-        typecheck(body, Block, function='TryStatement')
-        listtypecheck(catches, list, CatchClause, function='TryStatement')
-        typecheck(finallybody, (NoneType, Block), function='TryStatement')
+    def __init__(self, *, resources: Optional[List[Union['TryResource', Expression]]]=None, body: Block, catches: List['CatchClause'], finallybody: Optional[Block]=None, parent=None):
+        assert check_argument_types()
+        # check_type('resources', resources, Optional[List[Union[TryResource, Expression]]])
+        # check_type('body', body, Block)
+        # check_type('catches', catches, List[CatchClause])
+        # check_type('finallybody', finallybody, Optional[Block])
 
         super().__init__(parent)
 
@@ -2314,9 +2564,10 @@ class TryStatement(Statement):
         return result
 
 class TryResource(Node, Named, Documented, Dimension, Declaration):
-    def __init__(self, *, type, name, dimensions=[], init, doc=None, modifiers=[], annotations=[], parent=None):
-        typecheck(type, Type, function='TryResource')
-        typecheck(init, Expression, function='TryResource')
+    def __init__(self, *, type: Type, name, dimensions=[], init: Expression, doc=None, modifiers=[], annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Type)
+        # check_type('init', init, Expression)
 
         Node.__init__(self, parent)
         Declaration.__init__(self, modifiers, annotations)
@@ -2334,9 +2585,10 @@ class TryResource(Node, Named, Documented, Dimension, Declaration):
         return f"{self.doc_str(newlines=False)}{self.anno_str(newlines=False)}{self.mod_str()}{self.type} {self.name}{self.dim_str()} = {self.init}"
 
 class CatchClause(Node):
-    def __init__(self, *, var, body, parent=None):
-        typecheck(var, CatchVar, function='CatchClause')
-        typecheck(body, Block, function='CatchClause')
+    def __init__(self, *, var: 'CatchVar', body: Block, parent=None):
+        assert check_argument_types()
+        # check_type('var', var, CatchVar)
+        # check_type('body', body, Block)
 
         super().__init__(parent)
 
@@ -2350,8 +2602,9 @@ class CatchClause(Node):
         return f"catch({self.var})" + format_body(self.body, newline_in_empty_body=True)
     
 class CatchVar(Node, Named, Documented, Declaration):
-    def __init__(self, *, name, type, doc=None, modifiers=[], annotations=[], parent=None):
-        typecheck(type, (TypeIntersection, GenericType), function='CatchVar')
+    def __init__(self, *, name, type: Union[TypeIntersection, GenericType], doc=None, modifiers=[], annotations=[], parent=None):
+        assert check_argument_types()
+        # check_type('type', type, Union[TypeIntersection, GenericType])
 
         Node.__init__(self, parent)
         Named.__init__(self, name)
@@ -2367,9 +2620,10 @@ class CatchVar(Node, Named, Documented, Declaration):
         return f"{self.doc_str(newlines=False)}{self.anno_str(newlines=False)}{self.mod_str()}{self.type} {self.name}"
 
 class AssertStatement(Statement):
-    def __init__(self, *, condition, message=None, parent=None):
-        typecheck(condition, Expression, function='AssertStatement')
-        typecheck(message, (NoneType, Expression), function='AssertStatement')
+    def __init__(self, *, condition: Expression, message: Optional[Expression]=None, parent=None):
+        assert check_argument_types()
+        # check_type('condition', condition, Expression)
+        # check_type('message', message, Optional[Expression])
 
         super().__init__(parent)
 
@@ -2389,7 +2643,7 @@ class AssertStatement(Statement):
 
 class NodeVisitor:
     def __call__(self, node: Node, value=None):
-        typecheck(node, Node)
+        assert check_argument_types()
         proceed = node.accept(self, value)
         if not isinstance(proceed, bool):
             raise TypeError('Node.accept(NodeVisitor) did not return True or False')
@@ -2652,7 +2906,7 @@ class NodeVisitor:
     
 class NodeModifier(NodeVisitor):
     def __call__(self, node: Node):
-        typecheck(node, Node)
+        assert check_argument_types()
         proceed, node = node.accept(self, None)
         if not isinstance(proceed, bool):
             raise TypeError('Node.accept(NodeModifier) first return value must be True or False')
@@ -2669,3 +2923,6 @@ class NodeModifier(NodeVisitor):
         
     def visit_node(self, node: Node, value=None):
         return True, node
+
+if __name__ == "__main__":
+    print("Complete")

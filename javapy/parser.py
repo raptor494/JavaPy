@@ -1,15 +1,17 @@
 import javapy.tree as tree
 from javapy.util import *
 from javapy.tokenize import *
+from typeguard import check_type, check_argument_types
+from typing import Union, List, Optional, Type
 
 class JavaSyntaxError(SyntaxError):
     def __init__(self, msg='', at=None, token=None, got=None):
         if got is None:
-            typecheck(token, (NoneType, TokenInfo), function='JavaSyntaxError')
+            check_type('token', token, Optional[TokenInfo])
         else:
             if token is not None:
                 raise ValueError("JavaSyntaxError() arguments 'token' and 'got' are mutually exclusive")
-            typecheck(got, TokenInfo, function='JavaSyntaxError')
+            check_type('got', got, TokenInfo)
 
         msg = str(msg).strip()
 
@@ -38,8 +40,8 @@ class JavaSyntaxError(SyntaxError):
 
 class Parser:
     def __init__(self, tokens, filename='<unknown source>'):
-        typecheck(filename, str, function="Parser")
-        self.tokens = LookAheadListIterator(tokens)
+        check_type('filename', filename, str)
+        self.tokens = LookAheadListIterator(filter(lambda token: token.type != NL, tokens))
         self._scope = [False]
         self.filename = filename
         assert self.token.type == ENCODING
@@ -81,7 +83,7 @@ class Parser:
         elif isinstance(test, int):
             return token.exact_type == test #or test == NEWLINE and token.string == ';' # or test in (NEWLINE, DEDENT) and token.type == ENDMARKER
         else:
-            typecheck(test, (str, tuple), name=1)
+            check_type('test', test, Union[str, tuple])
 
     def accept(self, *tests):
         self.tokens.push_marker()
@@ -162,10 +164,7 @@ class Parser:
             result += '.' + self.parse_ident()
         return tree.Name(result)
 
-# ---------------------------------------------
-
-# ----- Compilation Unit -----
-
+    # ----- Compilation Unit -----
     def parse_compilation_unit(self):
         doc = self.doc
         modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
@@ -196,8 +195,9 @@ class Parser:
             doc = self.doc
             modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
 
-        while self.accept(';'):
-            self.accept(NEWLINE)
+        if not modifiers and not annotations:
+            while self.accept(';'):
+                self.accept(NEWLINE)
 
         if package is None and not modifiers and self.would_accept(('open', 'module')):
             return self.parse_module_declaration(imports, annotations, doc)
@@ -236,8 +236,9 @@ class Parser:
 
         return tree.ModuleCompilationUnit(name=name, open=isopen, imports=imports, annotations=annotations, doc=doc, members=members)
 
-# ----- Declarations -----
+    # /Compilation Unit
 
+    # ----- Declarations -----
     def parse_package_declaration(self, doc=None, annotations=None):
         if doc is None and self.token.type == STRING:
             doc = self.token.string
@@ -307,7 +308,7 @@ class Parser:
         if self.accept('*'):
             return base_name, True
         else:
-            base_name += self.parse_qual_name()
+            base_name += '.' + self.parse_qual_name()
             wildcard = bool(self.accept('.', '*'))
             return base_name, wildcard
 
@@ -391,9 +392,8 @@ class Parser:
         return tree.ProvidesDirective(name=name, provides=provides, doc=doc)
 
     def parse_type_declaration(self, doc=None, modifiers=None, annotations=None):
-        if doc is None and self.token.type == STRING:
-            doc = self.token.string
-            self.next()
+        if doc is None:
+            doc = self.doc
         if modifiers is None and annotations is None:
             modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
         
@@ -423,9 +423,8 @@ class Parser:
                 return modifiers, annotations
 
     def parse_class_declaration(self, doc=None, modifiers=None, annotations=None):
-        if doc is None and self.token.type == STRING:
-            doc = self.token.string
-            self.next()
+        if doc is None:
+            doc = self.doc
         if modifiers is None and annotations is None:
             modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
 
@@ -488,9 +487,8 @@ class Parser:
         return tree.AnnotationDeclaration(name=name, members=members, doc=doc, modifiers=modifiers, annotations=annotations)
 
     def parse_method_or_field_declaration(self, doc=None, modifiers=None, annotations=None, interface=False):
-        if doc is None and self.token.type == STRING:
-            doc = self.token.string
-            self.next()
+        if doc is None:
+            doc = self.doc
         if modifiers is None and annotations is None:
             modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
 
@@ -678,17 +676,6 @@ class Parser:
                 else:
                     members.append(self.parse_class_member())
 
-            # while not self.would_accept((';', DEDENT)):
-            #     fields.append(self.parse_enum_field())
-                
-            # if self.accept(';'):
-            #     self.accept(NEWLINE)
-            #     while not self.would_accept(DEDENT):
-            #         if self.accept(';'):
-            #             self.accept(NEWLINE)
-            #         else:
-            #             members.append(self.parse_class_member())
-                
             self.require(DEDENT)
 
         return fields, members
@@ -698,11 +685,11 @@ class Parser:
         if self.would_accept('static', ':'):
             self.next() # skip past the 'static' token
             body = self.parse_block()
-            return tree.InitializerBlock(body=body, static=True)
+            return tree.InitializerBlock(body=body, static=True, doc=doc)
         elif self.would_accept('this', ':'):
             self.next() # skip past the 'this' token
             body = self.parse_block()
-            return tree.InitializerBlock(body=body, static=False)
+            return tree.InitializerBlock(body=body, static=False, doc=doc)
         else:
             modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
             if self.would_accept(('class', 'interface', '@', 'enum')):
@@ -741,19 +728,20 @@ class Parser:
         if self.would_accept('static', ':'):
             self.next() # skips past the 'static' token
             body = self.parse_block()
-            return tree.InitializerBlock(body=body, static=True)
-        elif self.would_accept('dynamic', ':'):
+            return tree.InitializerBlock(body=body, static=True, doc=doc)
+        elif self.would_accept('this', ':'):
+            self.next() # skips past the 'this' token
             body = self.parse_block()
-            return tree.InitializerBlock(body=body, static=False)
+            return tree.InitializerBlock(body=body, static=False, doc=doc)
         else:
             modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
             if self.would_accept(('class', 'interface', '@', 'enum')):
                 return self.parse_type_declaration(doc, modifiers, annotations)
             else:
                 return self.parse_annotation_method_or_field_declaration(doc, modifiers, annotations)
+    # /Declarations
 
-# ----- Statements -----
-
+    # ----- Statements -----
     def parse_statement(self):
         if self.would_accept('if'):
             return self.parse_if()
@@ -781,14 +769,20 @@ class Parser:
             return self.parse_synchronized()
         elif self.would_accept('assert'):
             return self.parse_assert()
-        elif self.accept(';'):
-            self.require(NEWLINE)
-            return tree.EmptyStatement()
+        elif self.would_accept(';'):
+            return self.parse_empty_statement()
         elif self.would_accept('else'):
             raise JavaSyntaxError("'else' without 'if'", at=self.position())
         elif self.would_accept(('case', 'default')):
             raise JavaSyntaxError(f"'{self.token.string}' outside 'switch'", at=self.position())
         else:
+            return self.parse_expr_statement()
+
+    def parse_empty_statement(self):
+        self.require(';', NEWLINE)
+        return tree.EmptyStatement()
+
+    def parse_expr_statement(self):
             expr = self.parse_expr()
             self.require(NEWLINE)
             return tree.ExpressionStatement(expr)
@@ -805,7 +799,7 @@ class Parser:
         if self.would_accept('final') or self.would_accept('@') and not self.would_accept('@', 'interface'):
             return self.parse_class_or_variable_decl()
         if self.would_accept(('class', 'abstract')):
-            return self.parse_class_declaration(doc=self.doc)
+            return self.parse_class_declaration()
 
         if self.would_accept((NAME, tree.PrimitiveType.VALUES)):
             try:
@@ -862,15 +856,19 @@ class Parser:
         else:
             return self.parse_statement()
 
+    def parse_statement_body(self): return self.parse_block()
+
+    def parse_condition(self): return self.parse_expr()
+
     def parse_if(self):
         self.require('if')
-        condition = self.parse_expr()
-        body = self.parse_block()
+        condition = self.parse_condition()
+        body = self.parse_statement_body()
         if self.accept('else'):
             if self.would_accept('if'):
                 elsebody = self.parse_if()
             else:
-                elsebody = self.parse_block()
+                elsebody = self.parse_statement_body()
         else:
             elsebody = None
         return tree.IfStatement(condition=condition, body=body, elsebody=elsebody)
@@ -878,7 +876,7 @@ class Parser:
     def parse_for(self):
         self.require('for')
         control = self.parse_for_control()
-        body = self.parse_block()
+        body = self.parse_statement_body()
         return tree.ForLoop(control=control, body=body)
 
     def parse_for_control(self):
@@ -959,8 +957,8 @@ class Parser:
 
     def parse_while(self):
         self.require('while')
-        condition = self.parse_expr()
-        body = self.parse_block()
+        condition = self.parse_condition()
+        body = self.parse_statement_body()
         return tree.WhileLoop(condition=condition, body=body)
 
     def parse_synchronized(self):
@@ -968,15 +966,15 @@ class Parser:
         if self.would_accept(':'):
             lock = tree.This()
         else:
-            lock = self.parse_expr()
-        body = self.parse_block()
+            lock = self.parse_condition()
+        body = self.parse_statement_body()
         return tree.SynchronizedBlock(lock=lock, body=body)
 
     def parse_do(self):
         self.require('do')
-        body = self.parse_block()
+        body = self.parse_statement_body()
         self.require('while')
-        condition = self.parse_expr()
+        condition = self.parse_condition()
         self.require(NEWLINE)
         return tree.DoWhileLoop(condition=condition, body=body)
 
@@ -991,6 +989,8 @@ class Parser:
                 if parens and self.would_accept(')'):
                     break
                 resources.append(self.parse_try_resource())
+            if parens:
+                self.require(')')
         body = self.parse_block()
         catches = []
         while self.would_accept('catch'):
@@ -1034,7 +1034,7 @@ class Parser:
 
     def parse_switch(self):
         self.require('switch')
-        condition = self.parse_expr()
+        condition = self.parse_condition()
         self.require(':', NEWLINE, INDENT)
         cases = [self.parse_case()]
         while not self.would_accept(DEDENT):
@@ -1071,8 +1071,7 @@ class Parser:
                 self.require(DEDENT)
                 stmts = [tree.Block(stmts)]
             else:
-                stmts = [tree.ExpressionStatement(self.parse_expr())]
-                self.require(NEWLINE)
+                stmts = [self.parse_expr_statement()]
             return tree.SwitchCase(labels=labels, stmts=stmts, arrow=True)
         elif self.would_accept(':', NEWLINE, ('case', 'default')):
             self.next() # skip past the ':' token
@@ -1133,8 +1132,9 @@ class Parser:
         self.require(NEWLINE)
         return tree.AssertStatement(condition=condition, message=message)
 
-# ----- Type Stuff -----
+    # /Statements
 
+    # ----- Type Stuff -----
     def parse_type_parameters_opt(self):
         if self.would_accept('<'):
             return self.parse_type_parameters()
@@ -1398,8 +1398,9 @@ class Parser:
         self.require('[', ']')
         return result
 
-# ----- Expressions -----
+    # /Type Stuff
 
+    # ----- Expressions -----
     def parse_expr(self):
         return self.parse_assignment()
 
@@ -1551,29 +1552,36 @@ class Parser:
             return tree.IncrementExpression(op=op, prefix=True, expr=self.parse_postfix())
 
         else:
-            if self.would_accept('('):
-                try:
-                    with self.tokens:
-                        self.next() # skip past the '(' token
-                        typ = self.parse_cast_type()
-                        self.require(')')
-                        if self.would_accept('(') or self.would_accept(NAME, '->'):
-                            try:
-                                with self.tokens:
-                                    expr = self.parse_lambda()
-                            except JavaSyntaxError:
-                                expr = self.parse_postfix()
-                        else:
+            return self.parse_cast()
+
+    def parse_cast(self):
+        if self.would_accept('('):
+            try:
+                with self.tokens:
+                    self.next() # skip past the '(' token
+                    typ = self.parse_cast_type()
+                    self.require(')')
+                    if self.would_accept('(') or self.would_accept(NAME, '->'):
+                        try:
+                            with self.tokens:
+                                expr = self.parse_lambda()
+                        except JavaSyntaxError:
                             expr = self.parse_postfix()
-                        return tree.CastExpression(type=typ, expr=expr)
-                except JavaSyntaxError:
-                    pass
-            result = self.parse_postfix()
-            if self.would_accept(('++', '--')):
-                op = self.token.string
-                self.next()
-                result = tree.IncrementExpression(op=op, prefix=False, expr=result)
-            return result
+                            if self.would_accept(('++', '--')):
+                                op = self.token.string
+                                self.next()
+                                expr = tree.IncrementExpression(op=op, prefix=False, expr=expr)
+                    else:
+                        expr = self.parse_cast()
+                    return tree.CastExpression(type=typ, expr=expr)
+            except JavaSyntaxError:
+                pass
+        result = self.parse_postfix()
+        if self.would_accept(('++', '--')):
+            op = self.token.string
+            self.next()
+            result = tree.IncrementExpression(op=op, prefix=False, expr=result)
+        return result
 
     def parse_postfix(self):
         result = self.parse_primary()
@@ -1653,10 +1661,10 @@ class Parser:
     def parse_args(self):
         self.require('(')
         args = []
-        if not self.would_accept(')'):
+        while not self.would_accept((')', ENDMARKER)):
             args.append(self.parse_expr())
-            while self.accept(','):
-                args.append(self.parse_expr())
+            if not self.accept(','):
+                break
         self.require(')')
 
         return args
@@ -1666,13 +1674,13 @@ class Parser:
             result = tree.Literal(self.token.string)
             self.next()
         elif self.would_accept(STRING):
-            # string = eval(self.token.string)
-            # if self.token.string[0] == "'" and len(string) != 1:
-            #     ends = '"'
-            # else:
-            #     ends = self.token.string[0]
-            # result = tree.Literal(ends + repr(string)[1:-1].replace('"', R'\"') + ends)
-            result = tree.Literal(self.token.string)
+            import ast
+            string = ast.literal_eval(self.token.string)
+            if self.token.string[0] == "'" and len(string) != 1:
+                ends = '"'
+            else:
+                ends = self.token.string[0]
+            result = tree.Literal(ends + repr(string)[1:-1].replace('"', R'\"') + ends)
             self.next()
 
         elif self.accept('true'):
@@ -1684,23 +1692,11 @@ class Parser:
         elif self.accept('null'):
             result = tree.NullLiteral()
 
-        elif self.accept('this'):
-            if self.would_accept('('):
-                args = self.parse_args()
-                if not self.would_accept(NEWLINE):
-                    self.require(NEWLINE) # raises error
-                result = tree.ThisCall(args=args)
-            else:
-                result = tree.This()
+        elif self.would_accept('this'):
+            result = self.parse_primary_this()
 
-        elif self.accept('super'):
-            if self.would_accept('('):
-                args = self.parse_args()
-                if not self.would_accept(NEWLINE):
-                    self.require(NEWLINE) # raises error
-                result = tree.SuperCall(args=args)
-            else:
-                result = tree.Super()
+        elif self.would_accept('super'):
+            result = self.parse_primary_super()
 
         elif self.would_accept('switch'):
             result = self.parse_switch_expr()
@@ -1746,12 +1742,9 @@ class Parser:
                         raise JavaSyntaxError('')
             except JavaSyntaxError:
                     name = self.parse_name()
-                    
                     if self.would_accept('('):
                         args = self.parse_args()
-
                         result = tree.FunctionCall(name=name, args=args)
-                    
                     else:
                         result = tree.MemberAccess(name=name)
 
@@ -1766,7 +1759,26 @@ class Parser:
                 raise JavaSyntaxError("illegal start of expression", token=self.token, at=self.position())
 
         return result
-        
+
+    def parse_primary_this(self):
+        self.require('this')
+        if self.would_accept('('):
+            args = self.parse_args()
+            if not self.would_accept(NEWLINE):
+                self.require(NEWLINE) # raises error
+            return tree.ThisCall(args=args)
+        else:
+            return tree.This()
+
+    def parse_primary_super(self):
+        if self.would_accept('('):
+            args = self.parse_args()
+            if not self.would_accept(NEWLINE):
+                self.require(NEWLINE) # raises error
+            return tree.SuperCall(args=args)
+        else:
+            return tree.Super()
+                
     def parse_creator(self, allow_array=True):
         self.require('new')
         typeargs = self.parse_type_args_opt()
@@ -1837,26 +1849,29 @@ class Parser:
                     result = tree.ArrayCreator(type=typ, dimensions=dimensions)
 
             else:
-                args = self.parse_args()
-                if self.accept('{'):
-                    members = []
-                    if not self.accept('}'):
-                        self.require(NEWLINE)
-                        if not self.accept('}'):
-                            self.require(INDENT)
-                            while not self.would_accept(DEDENT):
-                                if self.accept(';'):
-                                    self.accept(NEWLINE)
-                                else:
-                                    members.append(self.parse_class_member())
-                            self.require(DEDENT, '}')
-                else:
-                    members = None
-                if typeargs is None:
-                    typeargs = []
-                result = tree.ClassCreator(type=typ, args=args, typeargs=typeargs, members=members)
+                result = self.parse_class_creator_rest(typ, typeargs)
         
         return result
+
+    def parse_class_creator_rest(self, type, typeargs):
+        args = self.parse_args()
+        if self.accept('{'):
+            members = []
+            if not self.accept('}'):
+                self.require(NEWLINE)
+                if not self.accept('}'):
+                    self.require(INDENT)
+                    while not self.would_accept(DEDENT):
+                        if self.accept(';'):
+                            self.accept(NEWLINE)
+                        else:
+                            members.append(self.parse_class_member())
+                    self.require(DEDENT, '}')
+        else:
+            members = None
+        if typeargs is None:
+            typeargs = []
+        return tree.ClassCreator(type=type, args=args, typeargs=typeargs, members=members)
 
     def parse_lambda(self):
         if self.would_accept(NAME):
@@ -1873,24 +1888,27 @@ class Parser:
 
         self.require('->')
 
-        if self.accept('{'):
-            self.require(NEWLINE, INDENT)
-            stmts = []
-            while not self.would_accept(DEDENT):
-                stmts.append(self.parse_block_statement())
-            self.require(DEDENT, '}')
-            body = tree.Block(stmts)
+        if self.would_accept('{'):
+            body = self.parse_lambda_block_body()
         else:
             body = self.parse_expr()
 
         return tree.Lambda(params=args, body=body)
+
+    def parse_lambda_block_body(self):
+        self.require('{', NEWLINE, INDENT)
+        stmts = []
+        while not self.would_accept((DEDENT, ENDMARKER)):
+            stmts.append(self.parse_block_statement())
+        self.require(DEDENT, '}')
+        return tree.Block(stmts)
 
     def parse_switch_expr(self):
         self.require('switch')
         condition = self.parse_expr()
         self.require('{', NEWLINE, INDENT)
         cases = []
-        while not self.would_accept(DEDENT):
+        while not self.would_accept((DEDENT, ENDMARKER)):
             cases.append(self.parse_case())
         self.require(DEDENT, '}')
         return tree.Switch(condition=condition, cases=cases)
@@ -1909,9 +1927,656 @@ class Parser:
 
         return tree.FunctionCall(args=elements, name=tree.Name('of'), object=tree.MemberAccess(name=tree.Name('List'), object=tree.MemberAccess(name=tree.Name('util'), object=tree.MemberAccess(name=tree.Name('java')))))
 
-def parse_file(file: open) -> tree.CompilationUnit:
-    return Parser(tokenize(file.readline)).parse_compilation_unit()
+    # /Expressions
 
-def parse_str(s: str, encoding='utf-8') -> tree.CompilationUnit:
+def parse_file(file, parser: Type[Parser]=Parser) -> tree.CompilationUnit:
+    assert check_argument_types()
+    return parser(tokenize(file.readline)).parse_compilation_unit()
+
+def parse_str(s: str, encoding='utf-8', parser: Type[Parser]=Parser) -> tree.CompilationUnit:
+    assert check_argument_types()
     import io
-    return Parser(tokenize(io.BytesIO(bytes(s, encoding)).readline)).parse_compilation_unit()
+    return parser(tokenize(io.BytesIO(bytes(s, encoding)).readline)).parse_compilation_unit()
+
+class JavaParser(Parser):
+    def __init__(self, tokens, filename='<unknown source>'):
+        super().__init__(filter(lambda token: token.type not in (NEWLINE, INDENT, DEDENT), tokens), filename)
+
+    def next(self):
+        next(self.tokens)
+        while self.token.type == COMMENT:
+            next(self.tokens)
+
+    @property
+    def doc(self):
+        last = self.tokens.look(-1)
+        if last.type == COMMENT and last.string != '/**/' and last.string[0:3] == '/**':
+            return last.string
+
+    # ----- Compilation Unit -----
+    def parse_compilation_unit(self):
+        doc = self.doc
+        modifiers, annotations = self.parse_mods_and_annotations()
+        
+        if not modifiers and self.would_accept('package'):
+            package = self.parse_package_declaration(doc, annotations)
+            doc = self.doc
+            modifiers, annotations = self.parse_mods_and_annotations()
+        else:
+            package = None
+
+        imports = []
+
+        if not modifiers and not annotations:
+            doc = None
+            while self.would_accept('import'):
+                imports.extend(self.parse_import_declarations())
+
+        # re-parse modifiers and annotations if the were used up
+        if not modifiers and not annotations:
+            doc = self.doc
+            modifiers, annotations = self.parse_mods_and_annotations()
+
+        if not modifiers and not annotations:
+            while self.accept(';'):
+                pass
+
+        if package is None and not modifiers and self.would_accept(('open', 'module')):
+            return self.parse_module_declaration(imports, annotations, doc)
+
+        if self.token.type != ENDMARKER or modifiers or annotations:
+            types = [self.parse_type_declaration(doc, modifiers, annotations)]
+            while self.token.type != ENDMARKER:
+                if not self.accept(';'):
+                    types.append(self.parse_type_declaration())
+        else:
+            types = []
+
+        if self.token.type != ENDMARKER:
+            raise JavaSyntaxError(f"unexpected token {simple_token_str(self.token)}", at=self.position())
+
+        return tree.CompilationUnit(package=package, imports=imports, types=types)
+
+    def parse_module_declaration(self, imports, annotations, doc):
+        isopen = bool(self.accept('open'))
+        self.require('module')
+        name = self.parse_qual_name()
+        self.require('{')
+        members = []
+        while not self.would_accept('}'):
+            members.append(self.parse_directive())
+        self.require('}')
+        return tree.ModuleCompilationUnit(name=name, open=isopen, imports=imports, annotations=annotations, doc=doc, members=members)
+    
+    # /Compilation Unit
+
+    # ----- Declarations -----
+    def parse_package_declaration(self, doc=None, annotations=None):
+        if doc is None and self.token.type == STRING:
+            doc = self.token.string
+            self.next()
+        if annotations is None:
+            annotations = self.parse_annotations(newlines=True)
+        
+        self.require('package')
+        name = self.parse_qual_name()
+        self.require(';')
+
+        return tree.Package(name=name, doc=doc, annotations=annotations)
+
+    def parse_import_declarations(self):
+        self.require('import')
+        static = bool(self.accept('static'))
+        name, wildcard = self.parse_import_name()
+        self.require(';')
+        return [tree.Import(name=name, static=static, wildcard=wildcard)]
+
+    parse_from_import_declarations = None
+
+    parse_from_import_name = None
+
+    def parse_requires_directive(self, doc):
+        self.require('requires')
+        modifiers = []
+        while self.would_accept(('transitive', 'static')):
+            modifiers.append(tree.Modifier(self.token.string))
+            self.next()
+        name = self.parse_qual_name()
+        self.require(';')
+        return tree.RequiresDirective(name=name, modifiers=modifiers, doc=doc)
+
+    def parse_exports_directive(self, doc):
+        self.require('exports')
+        name = self.parse_qual_name()
+        to = []
+        if self.accept('to'):
+            to.append(self.parse_qual_name())
+            while self.accept(','):
+                to.append(self.parse_qual_name())
+        self.require(';')
+        return tree.ExportsDirective(name=name, to=to, doc=doc)
+
+    def parse_opens_directive(self, doc):
+        self.require('opens')
+        name = self.parse_qual_name()
+        to = []
+        if self.accept('to'):
+            to.append(self.parse_qual_name())
+            while self.accept(','):
+                to.append(self.parse_qual_name())
+        self.require(';')
+        return tree.OpensDirective(name=name, to=to, doc=doc)
+
+    def parse_uses_directive(self, doc):
+        self.require('uses')
+        name = self.parse_qual_name()
+        if str(name) == 'var' or str(name).endswith('.var'):
+            last = self.tokens.last()
+            raise JavaSyntaxError("'var' cannot be used as a type name", at=(self.filename, *last.start, last.line))
+        self.require(';')
+        return tree.UsesDirective(name=name, doc=doc)
+
+    def parse_provides_directive(self, doc):
+        self.require('provides')
+        name = self.parse_qual_name()
+        if str(name) == 'var' or str(name).endswith('.var'):
+            last = self.tokens.last()
+            raise JavaSyntaxError("'var' cannot be used as a type name", at=(self.filename, *last.start, last.line))
+        provides = []
+        if self.accept('with'):
+            provides.append(self.parse_qual_name())
+            while self.accept(','):
+                provides.append(self.parse_qual_name())
+        self.require(';')
+        return tree.ProvidesDirective(name=name, provides=provides, doc=doc)
+
+    def parse_mods_and_annotations(self, newlines=True):
+        modifiers = []
+        annotations = []
+        while True:
+            if self.would_accept('@') and not self.would_accept('@', 'interface'):
+                annotations.append(self.parse_annotation())
+            elif self.would_accept(tree.Modifier.VALUES):
+                modifiers.append(tree.Modifier(self.token.string))
+                self.next()
+            else:
+                return modifiers, annotations
+   
+    def parse_method_rest(self, *, return_type, name, typeparams=None, doc=None, modifiers=[], annotations=[]):
+        params = self.parse_parameters()
+        if self.would_accept('[') or self.would_accept('@'):
+            dimensions = self.parse_dimensions()
+            if isinstance(return_type, tree.ArrayType):
+                return_type.dimensions += dimensions
+            else:
+                return_type = tree.ArrayType(return_type, dimensions)
+        throws = self.parse_generic_type_list() if self.accept('throws') else []
+        if self.would_accept('{'):
+            body = self.parse_function_body()
+        else:
+            self.require(';')
+            body = None
+
+        return tree.FunctionDeclaration(name=name, return_type=return_type, params=params, throws=throws, body=body, doc=doc, modifiers=modifiers, annotations=annotations)
+
+    def parse_annotation_property_rest(self, *, prop_type, name, doc=None, modifiers=[], annotations=[]):
+        self.require('(', ')')
+        dimensions = self.parse_dimensions_opt()
+        default = self.accept('default') and self.parse_annotation_value()
+        self.require(';')
+        return tree.AnnotationProperty(type=prop_type, name=name, default=default, doc=doc, modifiers=modifiers, annotations=annotations, dimensions=dimensions)
+
+    def parse_field_rest(self, *, var_type, name, doc=None, modifiers=[], annotations=[], require_init=False):
+        declarators = [self.parse_declarator_rest(name, require_init)]
+        while self.accept(','):
+            declarators.append(self.parse_declarator(require_init))
+        self.require(';')
+        return tree.FieldDeclaration(type=var_type, declarators=declarators, doc=doc, modifiers=modifiers, annotations=annotations)
+
+    def parse_class_body(self, parse_member):
+        self.require('{')
+        members = []
+        while not self.would_accept(('}', ENDMARKER)):
+            if not self.accept(';'):
+                members.append(parse_member())
+        self.require('}')
+
+        return members
+
+    def parse_enum_body(self):
+        self.require('{')
+        fields = []
+        members = []
+
+        while not self.would_accept((';', '}', ENDMARKER)):
+            fields.append(self.parse_enum_field())
+            if not self.accept(','):
+                break
+        
+        if self.accept(';'):
+            while not self.would_accept(('}', ENDMARKER)):
+                if not self.accept(';'):
+                    members.append(self.parse_class_member())
+            
+        self.require('}')
+
+        return fields, members
+
+    def parse_class_member(self):
+        doc = self.doc
+        if self.would_accept('static', '{'):
+            self.next() # skip past the 'static' token
+            body = self.parse_block()
+            return tree.InitializerBlock(body=body, static=True, doc=doc)
+        elif self.would_accept('{'):
+            body = self.parse_block()
+            return tree.InitializerBlock(body=body, static=False, doc=doc)
+        else:
+            modifiers, annotations = self.parse_mods_and_annotations()
+            if self.would_accept(('class', 'interface', '@', 'enum')):
+                return self.parse_type_declaration(doc, modifiers, annotations)
+            else:
+                return self.parse_method_or_field_declaration(doc, modifiers, annotations)
+
+    def parse_enum_field(self, doc=None, annotations=None):
+        if doc is None:
+            doc = self.doc
+        if annotations is None:
+            annotations = self.parse_annotations()
+        name = self.parse_name()
+        if self.would_accept('('):
+            args = self.parse_args()
+        else:
+            args = None
+        if self.would_accept('{'):
+            members = self.parse_class_body(self.parse_class_member)
+        else:
+            members = None
+
+        return tree.EnumField(name=name, args=args, members=members, doc=doc, annotations=annotations)
+
+    def parse_annotation_member(self):
+        doc = self.doc
+        if self.would_accept('static', '{'):
+            self.next() # skips past the 'static' token
+            body = self.parse_block()
+            return tree.InitializerBlock(body=body, static=True, doc=doc)
+        elif self.would_accept('{'):
+            body = self.parse_block()
+            return tree.InitializerBlock(body=body, static=False, doc=doc)
+        else:
+            modifiers, annotations = self.parse_mods_and_annotations()
+            if self.would_accept(('class', 'interface', '@', 'enum')):
+                return self.parse_type_declaration(doc, modifiers, annotations)
+            else:
+                return self.parse_annotation_method_or_field_declaration(doc, modifiers, annotations)
+
+    # /Declarations
+
+    # ----- Statements -----
+    def parse_statement(self):
+        if self.would_accept('{'):
+            return self.parse_block()
+        else:
+            return super().parse_statement()
+
+    def parse_empty_statement(self):
+        self.require(';')
+        return tree.EmptyStatement()
+
+    def parse_expr_statement(self):
+        expr = self.parse_expr()
+        self.require(';')
+        return tree.ExpressionStatement(expr)
+
+    def parse_block_statement(self):
+        if self.would_accept(NAME, ':', ('{', 'if', 'while', 'for', 'do', 'switch', 'synchronized', 'try')):
+            label = self.parse_name()
+            self.next() # skips past the ':' token
+            return tree.LabeledStatement(label=label, stmt=self.parse_statement())
+
+        if self.would_accept('final') or self.would_accept('@') and not self.would_accept('@', 'interface'):
+            return self.parse_class_or_variable_decl()
+        if self.would_accept(('class', 'abstract')):
+            return self.parse_class_declaration()
+
+        if self.would_accept((NAME, tree.PrimitiveType.VALUES)):
+            try:
+                with self.tokens:
+                    return self.parse_variable_decl()
+            except JavaSyntaxError as e1:
+                try:
+                    return self.parse_statement()
+                except JavaSyntaxError as e2:
+                    raise e2 from e1
+
+        return self.parse_statement()
+
+    def parse_variable_decl(self, doc=None, modifiers=None, annotations=None, end=';'):
+        return super().parse_variable_decl(doc, modifiers, annotations, end)
+
+    def parse_block(self):
+        self.require('{')
+        stmts = []
+        
+        while not self.would_accept(('}', ENDMARKER)):
+            stmts.append(self.parse_block_statement())
+        self.require('}')
+                
+        return tree.Block(stmts)
+
+    def parse_statement_body(self): return self.parse_statement()
+
+    def parse_condition(self):
+        self.require('(')
+        expr = self.parse_expr()
+        self.require(')')
+        return expr
+
+    def parse_for_control(self):
+        self.require('(')
+        try:
+            with self.tokens:
+                return self.parse_enhanced_for_control()
+        except JavaSyntaxError:
+            pass
+
+        if self.accept(';'):
+            init = None
+        else:
+            try:
+                with self.tokens:
+                    init = self.parse_variable_decl(end=';')
+            except JavaSyntaxError:
+                init = self.parse_expr_statement()
+
+        if self.accept(';'):
+            condition = None
+        else:
+            condition = self.parse_expr()
+            self.require(';')
+
+        update = []
+
+        if not self.would_accept(')'):            
+            update.append(self.parse_expr())
+            while self.accept(','):
+                update.append(self.parse_expr())
+
+        self.require(')')
+
+        return tree.ForControl(init=init, condition=condition, update=update)
+
+    def parse_enhanced_for_control(self):
+        var = self.parse_enhanced_for_var()
+        self.require(':')
+        iterable = self.parse_expr()
+        self.require(')')
+        return tree.EnhancedForControl(var=var, iterable=iterable)
+
+    def parse_enhanced_for_var(self):
+        modifiers, annotations = self.parse_mods_and_annotations()
+        typ = self.parse_type(annotations=[])
+        name = self.parse_name()
+        dimensions = self.parse_dimensions_opt()
+        return tree.VariableDeclaration(type=typ, declarators=[tree.VariableDeclarator(name=name, dimensions=dimensions)], modifiers=modifiers, annotations=annotations)
+
+    def parse_do(self):
+        self.require('do')
+        body = self.parse_statement_body()
+        self.require('while')
+        condition = self.parse_condition()
+        self.require(';')
+        return tree.DoWhileLoop(condition=condition, body=body)
+
+    def parse_synchronized(self):
+        self.require('synchronized')
+        lock = self.parse_condition()
+        body = self.parse_statement_body()
+        return tree.SynchronizedBlock(lock=lock, body=body)
+
+    def parse_try(self):
+        self.require('try')
+        if self.accept('('):
+            resources = [self.parse_try_resource()]
+            while self.accept(';'):
+                if self.would_accept(')'):
+                    break
+                resources.append(self.parse_try_resource())
+            self.require(')')
+        body = self.parse_block()
+        catches = []
+        while self.would_accept('catch'):
+            catches.append(self.parse_catch())
+
+        finallybody = self.accept('finally') and self.parse_block()
+
+        return tree.TryStatement(resources=resources, catches=catches, body=body, finallybody=finallybody)
+
+    def parse_catch(self):
+        self.require('catch', '(')
+        
+        modifiers, annotations = self.parse_mods_and_annotations(newlines=False)
+        typ = self.parse_type_intersection()
+
+        name = self.parse_name()
+        catchvar = tree.CatchVar(type=typ, name=name, modifiers=modifiers, annotations=annotations)
+
+        self.require(')')
+
+        body = self.parse_block()
+
+        return tree.CatchClause(var=catchvar, body=body)                
+
+    def parse_switch(self):
+        self.require('switch')
+        condition = self.parse_expr()
+        self.require('{')
+        cases = []
+        while not self.would_accept(('}', ENDMARKER)):
+            cases.append(self.parse_case())
+        self.require('}')
+        return tree.Switch(condition=condition, cases=cases)
+
+    def parse_case(self):
+        if self.accept('default'):
+            labels = None
+        else:
+            self.require('case')
+            labels = [self.parse_case_label()]
+            while self.accept(','):
+                labels.append(self.parse_case_label())
+        if self.accept('->'):
+            if self.would_accept('throw'):
+                stmts = [self.parse_throw()]
+            elif self.would_accept('{'):
+                stmts = [self.parse_block()]
+            else:
+                stmts = [self.parse_expr_statement()]
+            return tree.SwitchCase(labels=labels, stmts=stmts, arrow=True)
+        else:
+            self.require(':')
+            stmts = []
+            while not self.would_accept(('case', 'default', ENDMARKER)):
+                stmts.append(self.parse_block_statement())
+            return tree.SwitchCase(labels=labels, stmts=stmts, arrow=False)
+
+    def parse_return(self):
+        self.require('return')
+        if self.accept(';'):
+            return tree.ReturnStatement()
+        else:
+            result = tree.ReturnStatement(self.parse_expr())
+            self.require(';')
+            return result
+
+    def parse_throw(self):
+        self.require('throw')
+        result = tree.ThrowStatement(self.parse_expr())
+        self.require(';')
+        return result
+
+    def parse_break(self):
+        self.require('break')
+        if self.accept(';'):
+            return tree.BreakStatement()
+        else:
+            result = tree.BreakStatement(self.parse_name())
+            self.require(';')
+            return result
+
+    def parse_continue(self):
+        self.require('continue')
+        if self.accept(';'):
+            return tree.ContinueStatement()
+        else:
+            result = tree.ContinueStatement(self.parse_name())
+            self.require(';')
+            return result
+
+    def parse_yield(self):
+        self.require('yield')
+        result = tree.YieldStatement(self.parse_expr())
+        self.require(';')
+        return result
+
+    def parse_assert(self):
+        self.require('assert')
+        condition = self.parse_expr()
+        message = self.accept(':') and self.parse_expr()
+        self.require(';')
+        return tree.AssertStatement(condition=condition, message=message)
+
+    # /Statements
+
+    # ----- Type Stuff -----
+    def parse_type_parameters(self):
+        self.require('<')
+        params = [self.parse_type_parameter()]
+        while self.accept(','):
+            params.append(self.parse_type_parameter())
+        self.require('>')
+        return params
+
+    def parse_annotations(self, newlines=True):
+        annotations = []
+        while self.would_accept('@') and not self.would_accept('@', 'interface'):
+            annotations.append(self.parse_annotation())
+        return annotations
+
+    def parse_type_args(self):
+        self.require('<')
+        args = []
+        if not self.would_accept('>'):
+            args.append(self.parse_type_arg())
+            while self.accept(','):
+                args.append(self.parse_type_arg())
+        self.require('>')
+        return args
+
+    def parse_type_union(self, annotations=None):
+        if annotations is None:
+            annotations = self.parse_annotations(newlines=False)
+
+        typ = self.parse_generic_type(annotations=[])
+
+        if self.accept('&'):
+            types = [typ, self.parse_generic_type()]
+            while self.accept('&'):
+                types.append(self.parse_generic_type())
+            typ = tree.TypeUnion(types)
+
+        else:
+            typ.annotations = annotations
+
+        return typ
+
+    def parse_type_intersection(self, annotations=None):
+        if annotations is None:
+            annotations = self.parse_annotations(newlines=False)
+
+        typ = self.parse_generic_type(annotations=[])
+
+        if self.accept('|'):
+            types = [typ, self.parse_generic_type()]
+            while self.accept('|'):
+                types.append(self.parse_generic_type())
+            typ = tree.TypeIntersection(types)
+
+        else:
+            typ.annotations = annotations
+
+        return typ
+
+    def parse_generic_type_list(self):
+        types = [self.parse_generic_type()]
+        while self.accept(','):
+            types.append(self.parse_generic_type())
+        return types
+
+    # /Type Stuff
+
+    # ----- Expressions -----
+    def has_switch_last(self):
+        return False
+
+    def parse_args(self):
+        self.require('(')
+        args = []
+        if not self.would_accept(')'):
+            args.append(self.parse_expr())
+            while self.accept(','):
+                args.append(self.parse_expr())
+        self.require(')')
+
+        return args
+
+    def parse_list_literal(self):
+        raise JavaSyntaxError("illegal start of expression", token=self.token, at=self.position())
+    
+    def parse_primary_this(self):
+        self.require('this')
+        if self.would_accept('('):
+            args = self.parse_args()
+            if not self.would_accept(';'):
+                self.require(';') # raises error
+            return tree.ThisCall(args=args)
+        else:
+            return tree.This()
+
+    def parse_primary_super(self):
+        self.require('super')
+        if self.would_accept('('):
+            args = self.parse_args()
+            if not self.would_accept(';'):
+                self.require(';') # raises error
+            return tree.SuperCall(args=args)
+        else:
+            return tree.Super()
+
+    def parse_class_creator_rest(self, type, typeargs):
+        args = self.parse_args()
+        if self.would_accept('{'):
+            members = self.parse_class_body(self.parse_class_member)
+        else:
+            members = None
+        if typeargs is None:
+            typeargs = []
+        return tree.ClassCreator(type=type, args=args, typeargs=typeargs, members=members)
+
+    def parse_lambda_block_body(self):
+        return self.parse_block()
+
+    def parse_switch_expr(self):
+        self.require('switch')
+        condition = self.parse_expr()
+        self.require('{')
+        cases = []
+        while not self.would_accept(('}', ENDMARKER)):
+            cases.append(self.parse_case())
+        self.require('}')
+        return tree.Switch(condition=condition, cases=cases)
+
+    # /Expressions
+
+    

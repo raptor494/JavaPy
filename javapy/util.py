@@ -146,278 +146,278 @@ _TYPECHECK_CALL_REGEX = re.compile(r"^\s*typecheck\(\s*(.*?)(?:\s*,.*\)$)", re.A
 _ITERTYPECHECK_CALL_REGEX = re.compile(r"^\s*itertypecheck\(\s*(.*?)(?:\s*,.*\)$)", re.ASCII)
 _LISTTYPECHECK_CALL_REGEX = re.compile(r"^\s*listtypecheck\(\s*(.*?)(?:\s*,.*\)$)", re.ASCII)
 
-def typecheck(value, test, *, name=None, function=None, include_argument=True):
-    if isinstance(value, test): 
-        return
+# def typecheck(value, test, *, name=None, function=None, include_argument=True):
+    # if isinstance(value, test): 
+    #     return
 
-    if name is None or function is None:
-        try:
-            frameinfo = inspect.stack()[1]
+    # if name is None or function is None:
+    #     try:
+    #         frameinfo = inspect.stack()[1]
         
-            if function is None:
-                function = frameinfo.function
-                if function[0].isalpha() or function[0] == '_':
-                    function += '()'
-            elif not isinstance(function, str):
-                raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
-            elif isname(function):
-                function += '()'
+    #         if function is None:
+    #             function = frameinfo.function
+    #             if function[0].isalpha() or function[0] == '_':
+    #                 function += '()'
+    #         elif not isinstance(function, str):
+    #             raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
+    #         elif isname(function):
+    #             function += '()'
 
-            if name is None:
-                # import uncompyle6, io
-                # strio = io.StringIO()
-                # code = inspect.currentframe().f_back.f_code
-                # uncompyle6.code_deparse(code, out=strio)
-                # source = strio.getvalue()
-                source = frameinfo.code_context[frameinfo.index]
-                print(source)
-                match = _TYPECHECK_CALL_REGEX.match(source)
-                if match:
-                    name = match.group(1)
-            elif not isinstance(name, (str, int)):
-                raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-            else:
-                if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-                    name = f"argument {name!r}"
-                else:
-                    name = repr(name)
+    #         if name is None:
+    #             # import uncompyle6, io
+    #             # strio = io.StringIO()
+    #             # code = inspect.currentframe().f_back.f_code
+    #             # uncompyle6.code_deparse(code, out=strio)
+    #             # source = strio.getvalue()
+    #             source = frameinfo.code_context[frameinfo.index]
+    #             print(source)
+    #             match = _TYPECHECK_CALL_REGEX.match(source)
+    #             if match:
+    #                 name = match.group(1)
+    #         elif not isinstance(name, (str, int)):
+    #             raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #         else:
+    #             if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #                 name = f"argument {name!r}"
+    #             else:
+    #                 name = repr(name)
 
-        finally:
-            del frameinfo
+    #     finally:
+    #         del frameinfo
 
-    else:
-        if not isinstance(name, (str, int)):
-            raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-        if not isinstance(function, str):
-            raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
-        if isname(function):
-            function += '()'
-        if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-            name = f"argument {name!r}"
-        else:
-            name = repr(name)
+    # else:
+    #     if not isinstance(name, (str, int)):
+    #         raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #     if not isinstance(function, str):
+    #         raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
+    #     if isname(function):
+    #         function += '()'
+    #     if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #         name = f"argument {name!r}"
+    #     else:
+    #         name = repr(name)
 
-    if isinstance(test, tuple):
-        options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
-    else:
-        options = test.__name__
+    # if isinstance(test, tuple):
+    #     options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
+    # else:
+    #     options = test.__name__
 
-    if name is None:
-        msg = f"{function} argument must be {options}, not '{typename(value)}'"
-    else:
-        msg = f"{function} {name} must be {options}, not '{typename(value)}'"
+    # if name is None:
+    #     msg = f"{function} argument must be {options}, not '{typename(value)}'"
+    # else:
+    #     msg = f"{function} {name} must be {options}, not '{typename(value)}'"
 
-    raise TypeError(msg)
+    # raise TypeError(msg)
 
-class FormatIndexMode(Enum):
-    NO_FORMAT = 0
-    FORMAT = 1
-    OLD_FORMAT = 2
+# class FormatIndexMode(Enum):
+    # NO_FORMAT = 0
+    # FORMAT = 1
+    # OLD_FORMAT = 2
 
-def itertypecheck(iterable, test, *, name=None, function=None, include_argument=True, index_format=FormatIndexMode.NO_FORMAT):
-    typecheck(index_format, FormatIndexMode)
-    for index, value in enumerate(iterable):
-        if not isinstance(value, test):
-            if name is None or function is None:
-                try:
-                    frameinfo = inspect.stack()[1]
+# def itertypecheck(iterable, test, *, name=None, function=None, include_argument=True, index_format=FormatIndexMode.NO_FORMAT):
+    # typecheck(index_format, FormatIndexMode)
+    # for index, value in enumerate(iterable):
+    #     if not isinstance(value, test):
+    #         if name is None or function is None:
+    #             try:
+    #                 frameinfo = inspect.stack()[1]
                 
-                    if function is None:
-                        function = frameinfo.function
-                        if function[0].isalpha() or function[0] == '_':
-                            function += '()'
-                    elif not isinstance(function, str):
-                        raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
-                    elif isname(function):
-                        function += '()'
+    #                 if function is None:
+    #                     function = frameinfo.function
+    #                     if function[0].isalpha() or function[0] == '_':
+    #                         function += '()'
+    #                 elif not isinstance(function, str):
+    #                     raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
+    #                 elif isname(function):
+    #                     function += '()'
 
-                    if name is None:
-                        # import uncompyle6, io
-                        # strio = io.StringIO()
-                        # code = inspect.currentframe().f_back.f_code
-                        # uncompyle6.code_deparse(code, out=strio)
-                        # source = strio.getvalue()
-                        source = frameinfo.code_context[frameinfo.index]
-                        print(source)
-                        match = _TYPECHECK_CALL_REGEX.match(source)
-                        if match:
-                            name = match.group(1)
-                    elif not isinstance(name, (str, int)):
-                        raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-                    else:
-                        if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-                            name = f"argument {name!r}"
-                        else:
-                            name = repr(name)
+    #                 if name is None:
+    #                     # import uncompyle6, io
+    #                     # strio = io.StringIO()
+    #                     # code = inspect.currentframe().f_back.f_code
+    #                     # uncompyle6.code_deparse(code, out=strio)
+    #                     # source = strio.getvalue()
+    #                     source = frameinfo.code_context[frameinfo.index]
+    #                     print(source)
+    #                     match = _TYPECHECK_CALL_REGEX.match(source)
+    #                     if match:
+    #                         name = match.group(1)
+    #                 elif not isinstance(name, (str, int)):
+    #                     raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #                 else:
+    #                     if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #                         name = f"argument {name!r}"
+    #                     else:
+    #                         name = repr(name)
 
-                finally:
-                    del frameinfo
+    #             finally:
+    #                 del frameinfo
 
-            else:
-                if not isinstance(name, (str, int)):
-                    raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-                if not isinstance(function, str):
-                    raise TypeError(f"typecheck() argument 'function' must be string, not '{typename(function)}'")
-                if isname(function):
-                    function += '()'
-                if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-                    name = f"argument {name!r}"
-                else:
-                    name = repr(name)
+    #         else:
+    #             if not isinstance(name, (str, int)):
+    #                 raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #             if not isinstance(function, str):
+    #                 raise TypeError(f"typecheck() argument 'function' must be string, not '{typename(function)}'")
+    #             if isname(function):
+    #                 function += '()'
+    #             if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #                 name = f"argument {name!r}"
+    #             else:
+    #                 name = repr(name)
 
-            if isinstance(test, tuple):
-                options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
-            else:
-                options = test.__name__
+    #         if isinstance(test, tuple):
+    #             options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
+    #         else:
+    #             options = test.__name__
 
-            if name is None:
-                msg = f"{function} argument value at index {index} must be {options}, not '{typename(value)}'"
-            else:
-                if index_format is FormatIndexMode.NO_FORMAT: 
-                    msg = f"{function} {name}[{index}] must be {options}, not '{typename(value)}'"
-                elif index_format is FormatIndexMode.FORMAT:
-                    msg = f"{function} {name.format(index)} must be {options}, not '{typename(value)}'"
-                elif index_format is FormatIndexMode.OLD_FORMAT:
-                    msg = f"{function} {name % index} must be {options}, not '{typename(value)}'"
+    #         if name is None:
+    #             msg = f"{function} argument value at index {index} must be {options}, not '{typename(value)}'"
+    #         else:
+    #             if index_format is FormatIndexMode.NO_FORMAT: 
+    #                 msg = f"{function} {name}[{index}] must be {options}, not '{typename(value)}'"
+    #             elif index_format is FormatIndexMode.FORMAT:
+    #                 msg = f"{function} {name.format(index)} must be {options}, not '{typename(value)}'"
+    #             elif index_format is FormatIndexMode.OLD_FORMAT:
+    #                 msg = f"{function} {name % index} must be {options}, not '{typename(value)}'"
 
-            raise TypeError(msg)
+    #         raise TypeError(msg)
 
-def listtypecheck(iterable, itertypetest, test, *, name=None, function=None, include_argument=True, index_format=FormatIndexMode.NO_FORMAT):
-    typecheck(index_format, FormatIndexMode)
-    if not isinstance(iterable, itertypetest):
-        if name is None or function is None:
-            try:
-                frameinfo = inspect.stack()[1]
+# def listtypecheck(iterable, itertypetest, test, *, name=None, function=None, include_argument=True, index_format=FormatIndexMode.NO_FORMAT):
+    # typecheck(index_format, FormatIndexMode)
+    # if not isinstance(iterable, itertypetest):
+    #     if name is None or function is None:
+    #         try:
+    #             frameinfo = inspect.stack()[1]
             
-                if function is None:
-                    function = frameinfo.function
-                    if function[0].isalpha() or function[0] == '_':
-                        function += '()'
-                elif not isinstance(function, str):
-                    raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
-                elif isname(function):
-                    function += '()'
+    #             if function is None:
+    #                 function = frameinfo.function
+    #                 if function[0].isalpha() or function[0] == '_':
+    #                     function += '()'
+    #             elif not isinstance(function, str):
+    #                 raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
+    #             elif isname(function):
+    #                 function += '()'
 
-                if name is None:
-                    # import uncompyle6, io
-                    # strio = io.StringIO()
-                    # code = inspect.currentframe().f_back.f_code
-                    # uncompyle6.code_deparse(code, out=strio)
-                    # source = strio.getvalue()
-                    source = frameinfo.code_context[frameinfo.index]
-                    match = _LISTTYPECHECK_CALL_REGEX.match(source)
-                    if match:
-                        name = match.group(1)
-                elif not isinstance(name, (str, int)):
-                    raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-                else:
-                    if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-                        name = f"argument {name!r}"
-                    else:
-                        name = repr(name)
+    #             if name is None:
+    #                 # import uncompyle6, io
+    #                 # strio = io.StringIO()
+    #                 # code = inspect.currentframe().f_back.f_code
+    #                 # uncompyle6.code_deparse(code, out=strio)
+    #                 # source = strio.getvalue()
+    #                 source = frameinfo.code_context[frameinfo.index]
+    #                 match = _LISTTYPECHECK_CALL_REGEX.match(source)
+    #                 if match:
+    #                     name = match.group(1)
+    #             elif not isinstance(name, (str, int)):
+    #                 raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #             else:
+    #                 if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #                     name = f"argument {name!r}"
+    #                 else:
+    #                     name = repr(name)
 
-            finally:
-                del frameinfo
+    #         finally:
+    #             del frameinfo
 
-        else:
-            if not isinstance(name, (str, int)):
-                raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-            if not isinstance(function, str):
-                raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
-            if isname(function):
-                function += '()'
-            if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-                name = f"argument {name!r}"
-            else:
-                name = repr(name)
+    #     else:
+    #         if not isinstance(name, (str, int)):
+    #             raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #         if not isinstance(function, str):
+    #             raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
+    #         if isname(function):
+    #             function += '()'
+    #         if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #             name = f"argument {name!r}"
+    #         else:
+    #             name = repr(name)
 
-        if isinstance(test, tuple):
-            options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
-        else:
-            options = test.__name__
+    #     if isinstance(test, tuple):
+    #         options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
+    #     else:
+    #         options = test.__name__
 
-        if name is None:
-            error = TypeError(f"{function} argument must be {options}, not '{typename(iterable)}'")
-        else:
-            error = TypeError(f"{function} {name} must be {options}, not '{typename(iterable)}'")
+    #     if name is None:
+    #         error = TypeError(f"{function} argument must be {options}, not '{typename(iterable)}'")
+    #     else:
+    #         error = TypeError(f"{function} {name} must be {options}, not '{typename(iterable)}'")
 
-        raise error
+    #     raise error
 
-    if iterable is None:
-        return
+    # if iterable is None:
+    #     return
 
-    try:
-        for index, value in enumerate(iterable):
-            if not isinstance(value, test):
-                if name is None or function is None:
-                    try:
-                        frameinfo = inspect.stack()[1]
+    # try:
+    #     for index, value in enumerate(iterable):
+    #         if not isinstance(value, test):
+    #             if name is None or function is None:
+    #                 try:
+    #                     frameinfo = inspect.stack()[1]
                     
-                        if function is None:
-                            function = frameinfo.function
-                            if function[0].isalpha() or function[0] == '_':
-                                function += '()'
-                        elif not isinstance(function, str):
-                            raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
-                        elif isname(function):
-                            function += '()'
+    #                     if function is None:
+    #                         function = frameinfo.function
+    #                         if function[0].isalpha() or function[0] == '_':
+    #                             function += '()'
+    #                     elif not isinstance(function, str):
+    #                         raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
+    #                     elif isname(function):
+    #                         function += '()'
 
-                        if name is None:
-                            # import uncompyle6, io
-                            # strio = io.StringIO()
-                            # code = inspect.currentframe().f_back.f_code
-                            # uncompyle6.code_deparse(code, out=strio)
-                            # source = strio.getvalue()
-                            source = frameinfo.code_context[frameinfo.index]
-                            print(source)
-                            match = _LISTTYPECHECK_CALL_REGEX.match(source)
-                            if match:
-                                name = match.group(1)
-                        elif not isinstance(name, (str, int)):
-                            raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-                        else:
-                            if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-                                name = f"argument {name!r}"
-                            else:
-                                name = repr(name)
+    #                     if name is None:
+    #                         # import uncompyle6, io
+    #                         # strio = io.StringIO()
+    #                         # code = inspect.currentframe().f_back.f_code
+    #                         # uncompyle6.code_deparse(code, out=strio)
+    #                         # source = strio.getvalue()
+    #                         source = frameinfo.code_context[frameinfo.index]
+    #                         print(source)
+    #                         match = _LISTTYPECHECK_CALL_REGEX.match(source)
+    #                         if match:
+    #                             name = match.group(1)
+    #                     elif not isinstance(name, (str, int)):
+    #                         raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #                     else:
+    #                         if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #                             name = f"argument {name!r}"
+    #                         else:
+    #                             name = repr(name)
 
-                    finally:
-                        del frameinfo
+    #                 finally:
+    #                     del frameinfo
 
-                else:
-                    if not isinstance(name, (str, int)):
-                        raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
-                    if not isinstance(function, str):
-                        raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
-                    if isname(function):
-                        function += '()'
-                    if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
-                        name = f"argument {name!r}"
-                    else:
-                        name = repr(name)
+    #             else:
+    #                 if not isinstance(name, (str, int)):
+    #                     raise TypeError(f"typecheck() argument 'name' must be string or int, not '{typename(name)}'")
+    #                 if not isinstance(function, str):
+    #                     raise TypeError(f"typecheck(0 argument 'function' must be string, not '{typename(function)}'")
+    #                 if isname(function):
+    #                     function += '()'
+    #                 if include_argument and (not isinstance(name, str) or not re.match(r"argument\s+.+", name)):
+    #                     name = f"argument {name!r}"
+    #                 else:
+    #                     name = repr(name)
 
-                if isinstance(test, tuple):
-                    options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
-                else:
-                    options = test.__name__
+    #             if isinstance(test, tuple):
+    #                 options = join_natural(('string' if typ is str else typ.__name__ for typ in test), word='or')
+    #             else:
+    #                 options = test.__name__
 
-                if name is None:
-                    msg = f"{function} argument value at index {index} must be {options}, not '{typename(value)}'"
-                else:
-                    if index_format is FormatIndexMode.NO_FORMAT: 
-                        msg = f"{function} {name}[{index}] must be {options}, not '{typename(value)}'"
-                    elif index_format is FormatIndexMode.FORMAT:
-                        msg = f"{function} {name.format(index)} must be {options}, not '{typename(value)}'"
-                    elif index_format is FormatIndexMode.OLD_FORMAT:
-                        msg = f"{function} {name % index} must be {options}, not '{typename(value)}'"
+    #             if name is None:
+    #                 msg = f"{function} argument value at index {index} must be {options}, not '{typename(value)}'"
+    #             else:
+    #                 if index_format is FormatIndexMode.NO_FORMAT: 
+    #                     msg = f"{function} {name}[{index}] must be {options}, not '{typename(value)}'"
+    #                 elif index_format is FormatIndexMode.FORMAT:
+    #                     msg = f"{function} {name.format(index)} must be {options}, not '{typename(value)}'"
+    #                 elif index_format is FormatIndexMode.OLD_FORMAT:
+    #                     msg = f"{function} {name % index} must be {options}, not '{typename(value)}'"
 
-                raise TypeError(msg)
+    #             raise TypeError(msg)
 
-    except TypeError as e:
-        if str(e) == f"'{type(iterable).__name__}' object is not iterable":
-            return
-        else:
-            raise
+    # except TypeError as e:
+    #     if str(e) == f"'{type(iterable).__name__}' object is not iterable":
+    #         return
+    #     else:
+    #         raise
 
 class LookAheadListIterator(object):
     def __init__(self, iterable):
