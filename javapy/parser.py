@@ -1676,10 +1676,10 @@ class Parser:
         elif self.would_accept(STRING):
             import ast
             string = ast.literal_eval(self.token.string)
-            if self.token.string[0] == "'" and len(string) != 1:
+            if self.token.string[-1] == "'" and len(string) != 1:
                 ends = '"'
             else:
-                ends = self.token.string[0]
+                ends = self.token.string[-1]
             result = tree.Literal(ends + repr(string)[1:-1].replace('"', R'\"') + ends)
             self.next()
 

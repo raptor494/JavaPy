@@ -188,7 +188,7 @@ Floatnumber = group(Hexfloat, Pointfloat, Expfloat) + maybe(FloatSuffix)
 Number = group(Floatnumber, Intnumber)
 
 # Return the empty string, plus all of the valid string prefixes.
-all_string_prefixes = {'', 'r'}
+all_string_prefixes = {'', 'r', 'R'}
 
 # Note that since _all_string_prefixes includes the empty string,
 #  StringPrefix can be the empty string (making it optional).
