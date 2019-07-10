@@ -164,7 +164,7 @@ class Parser:
             result += '.' + self.parse_ident()
         return tree.Name(result)
 
-    # ----- Compilation Unit -----
+    #region Compilation Unit
     def parse_compilation_unit(self):
         doc = self.doc
         modifiers, annotations = self.parse_mods_and_annotations(newlines=True)
@@ -236,9 +236,9 @@ class Parser:
 
         return tree.ModuleCompilationUnit(name=name, open=isopen, imports=imports, annotations=annotations, doc=doc, members=members)
 
-    # /Compilation Unit
+    #endregion Compilation Unit
 
-    # ----- Declarations -----
+    #region Declarations
     def parse_package_declaration(self, doc=None, annotations=None):
         if doc is None and self.token.type == STRING:
             doc = self.token.string
@@ -582,19 +582,19 @@ class Parser:
         return tree.AnnotationProperty(type=prop_type, name=name, default=default, doc=doc, modifiers=modifiers, annotations=annotations, dimensions=dimensions)
 
     def parse_field_rest(self, *, var_type, name, doc=None, modifiers=[], annotations=[], require_init=False):
-        declarators = [self.parse_declarator_rest(name, require_init)]
+        declarators = [self.parse_declarator_rest(name, require_init, array=isinstance(var_type, tree.ArrayType))]
         while self.accept(','):
-            declarators.append(self.parse_declarator(require_init))
+            declarators.append(self.parse_declarator(require_init, array=isinstance(var_type, tree.ArrayType)))
         self.require(NEWLINE)
         return tree.FieldDeclaration(type=var_type, declarators=declarators, doc=doc, modifiers=modifiers, annotations=annotations)
 
-    def parse_declarator(self, require_init=False):
-        return self.parse_declarator_rest(self.parse_name(), require_init)
+    def parse_declarator(self, require_init=False, array=False):
+        return self.parse_declarator_rest(self.parse_name(), require_init, array)
 
-    def parse_declarator_rest(self, name, require_init=False):
+    def parse_declarator_rest(self, name, require_init=False, array=False):
         dimensions = self.parse_dimensions_opt()
         accept = self.require if require_init else self.accept
-        init = accept('=') and self.parse_initializer()
+        init = accept('=') and self.parse_initializer(dimensions or array)
         return tree.VariableDeclarator(name=name, init=init, dimensions=dimensions)
 
     def parse_parameters(self, allow_this=True):
@@ -739,9 +739,9 @@ class Parser:
                 return self.parse_type_declaration(doc, modifiers, annotations)
             else:
                 return self.parse_annotation_method_or_field_declaration(doc, modifiers, annotations)
-    # /Declarations
+    #endregion Declarations
 
-    # ----- Statements -----
+    #region Statements
     def parse_statement(self):
         if self.would_accept('if'):
             return self.parse_if()
@@ -830,9 +830,9 @@ class Parser:
             typ = tree.GenericType(name=tree.Name('var'))
         else:
             typ = self.parse_type()
-        declarators = [self.parse_declarator()]
+        declarators = [self.parse_declarator(array=isinstance(typ, tree.ArrayType))]
         while self.accept(','):
-            declarators.append(self.parse_declarator())
+            declarators.append(self.parse_declarator(array=isinstance(typ, tree.ArrayType)))
         self.require(end)
         return tree.VariableDeclaration(type=typ, declarators=declarators, doc=doc, modifiers=modifiers, annotations=annotations)
 
@@ -1132,9 +1132,9 @@ class Parser:
         self.require(NEWLINE)
         return tree.AssertStatement(condition=condition, message=message)
 
-    # /Statements
+    #endregion Statements
 
-    # ----- Type Stuff -----
+    #region Type Stuff
     def parse_type_parameters_opt(self):
         if self.would_accept('<'):
             return self.parse_type_parameters()
@@ -1398,14 +1398,14 @@ class Parser:
         self.require('[', ']')
         return result
 
-    # /Type Stuff
+    #endregion Type Stuff
 
-    # ----- Expressions -----
+    #region Expressions
     def parse_expr(self):
         return self.parse_assignment()
 
-    def parse_initializer(self):
-        if self.would_accept('{'):
+    def parse_initializer(self, array=True):
+        if array and self.would_accept('{'):
             return self.parse_array_init()
         else:
             return self.parse_expr()
@@ -1721,6 +1721,9 @@ class Parser:
         elif self.would_accept('['):
             result = self.parse_list_literal()
 
+        elif self.would_accept('{'):
+            result = self.parse_map_literal()
+
         elif self.would_accept('<'):
             typeargs = self.parse_type_args()
             name = self.parse_name()
@@ -1925,9 +1928,54 @@ class Parser:
                     elements.append(self.parse_expr())
         self.require(']')
 
-        return tree.FunctionCall(args=elements, name=tree.Name('of'), object=tree.MemberAccess(name=tree.Name('List'), object=tree.MemberAccess(name=tree.Name('util'), object=tree.MemberAccess(name=tree.Name('java')))))
+        return tree.FunctionCall(args=elements,
+                                 name=tree.Name('of'), 
+                                 object=tree.MemberAccess(name=tree.Name('List'), 
+                                                          object=tree.MemberAccess(name=tree.Name('util'),
+                                                                                   object=tree.MemberAccess(name=tree.Name('java')))))
 
-    # /Expressions
+    def parse_map_literal(self):
+        self.require('{')
+        entries = []
+        if not self.would_accept('}'):
+            if not self.accept(','):
+                entries.append(self.parse_map_entry())
+                while self.accept(','):
+                    if self.would_accept(']'):
+                        break
+                    entries.append(self.parse_map_entry())
+        self.require('}')
+
+        if len(entries) <= 10:
+            args = []
+            for key, value in entries:
+                args.append(key)
+                args.append(value)
+            return tree.FunctionCall(args=args,
+                                     name=tree.Name('of'), 
+                                     object=tree.MemberAccess(name=tree.Name('Map'), 
+                                                              object=tree.MemberAccess(name=tree.Name('util'),
+                                                                                       object=tree.MemberAccess(name=tree.Name('java')))))
+        else:
+            for i, (key, value) in enumerate(entries):
+                entries[i] = tree.FunctionCall(args=[key, value],
+                                               name=tree.Name('entry'), 
+                                               object=tree.MemberAccess(name=tree.Name('Map'), 
+                                                                        object=tree.MemberAccess(name=tree.Name('util'),
+                                                                                                 object=tree.MemberAccess(name=tree.Name('java')))))
+            return tree.FunctionCall(args=entries,
+                                     name=tree.Name('ofEntries'), 
+                                     object=tree.MemberAccess(name=tree.Name('Map'), 
+                                                              object=tree.MemberAccess(name=tree.Name('util'),
+                                                                                       object=tree.MemberAccess(name=tree.Name('java')))))
+
+    def parse_map_entry(self):
+        key = self.parse_expr()
+        self.require(':')
+        value = self.parse_expr()
+        return key, value
+
+    #endregion Expressions
 
 def parse_file(file, parser: Type[Parser]=Parser) -> tree.CompilationUnit:
     assert check_argument_types()
@@ -1953,7 +2001,7 @@ class JavaParser(Parser):
         if last.type == COMMENT and last.string != '/**/' and last.string[0:3] == '/**':
             return last.string
 
-    # ----- Compilation Unit -----
+    #region Compilation Unit
     def parse_compilation_unit(self):
         doc = self.doc
         modifiers, annotations = self.parse_mods_and_annotations()
@@ -2008,9 +2056,9 @@ class JavaParser(Parser):
         self.require('}')
         return tree.ModuleCompilationUnit(name=name, open=isopen, imports=imports, annotations=annotations, doc=doc, members=members)
     
-    # /Compilation Unit
+    #endregion Compilation Unit
 
-    # ----- Declarations -----
+    #region Declarations
     def parse_package_declaration(self, doc=None, annotations=None):
         if doc is None and self.token.type == STRING:
             doc = self.token.string
@@ -2127,9 +2175,9 @@ class JavaParser(Parser):
         return tree.AnnotationProperty(type=prop_type, name=name, default=default, doc=doc, modifiers=modifiers, annotations=annotations, dimensions=dimensions)
 
     def parse_field_rest(self, *, var_type, name, doc=None, modifiers=[], annotations=[], require_init=False):
-        declarators = [self.parse_declarator_rest(name, require_init)]
+        declarators = [self.parse_declarator_rest(name, require_init, array=isinstance(var_type, tree.ArrayType))]
         while self.accept(','):
-            declarators.append(self.parse_declarator(require_init))
+            declarators.append(self.parse_declarator(require_init, array=isinstance(var_type, tree.ArrayType)))
         self.require(';')
         return tree.FieldDeclaration(type=var_type, declarators=declarators, doc=doc, modifiers=modifiers, annotations=annotations)
 
@@ -2211,9 +2259,9 @@ class JavaParser(Parser):
             else:
                 return self.parse_annotation_method_or_field_declaration(doc, modifiers, annotations)
 
-    # /Declarations
+    #endregion Declarations
 
-    # ----- Statements -----
+    #region Statements
     def parse_statement(self):
         if self.would_accept('{'):
             return self.parse_block()
@@ -2447,9 +2495,9 @@ class JavaParser(Parser):
         self.require(';')
         return tree.AssertStatement(condition=condition, message=message)
 
-    # /Statements
+    #endregion Statements
 
-    # ----- Type Stuff -----
+    #region Type Stuff
     def parse_type_parameters(self):
         self.require('<')
         params = [self.parse_type_parameter()]
@@ -2514,9 +2562,9 @@ class JavaParser(Parser):
             types.append(self.parse_generic_type())
         return types
 
-    # /Type Stuff
+    #endregion Type Stuff
 
-    # ----- Expressions -----
+    #region Expressions
     def has_switch_last(self):
         return False
 
@@ -2534,6 +2582,9 @@ class JavaParser(Parser):
     def parse_list_literal(self):
         raise JavaSyntaxError("illegal start of expression", token=self.token, at=self.position())
     
+    def parse_map_literal(self):
+        raise JavaSyntaxError("illegal start of expression", token=self.token, at=self.position())
+
     def parse_primary_this(self):
         self.require('this')
         if self.would_accept('('):
@@ -2577,6 +2628,6 @@ class JavaParser(Parser):
         self.require('}')
         return tree.Switch(condition=condition, cases=cases)
 
-    # /Expressions
+    #endregion Expressions
 
     
