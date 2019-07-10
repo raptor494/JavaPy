@@ -2,15 +2,22 @@ import javapy.tree as tree
 from javapy.util import *
 from javapy.tokenize import *
 from typeguard import check_type, check_argument_types
-from typing import Union, List, Optional, Type
+from typing import Union, List, Optional, Type, Tuple
 
 class JavaSyntaxError(SyntaxError):
-    def __init__(self, msg='', at=None, token=None, got=None):
+    def __init__(self, msg: str='', at: Optional[Tuple[str, int, int, str]]=None, token: Optional[TokenInfo]=None, got: Optional[TokenInfo]=None):
+        """        
+        Args:
+            msg (str, optional): The error message. Defaults to ''.
+            at (Tuple[str, int, int, str], optional): A tuple of (filename, line, column, line string). Defaults to None.
+            token (TokenInfo, optional): The error token. Defaults to None.
+            got (TokenInfo, optional): The token which was gotten (adjusts the error message slightly). Defaults to None.
+        """
         if got is None:
             check_type('token', token, Optional[TokenInfo])
         else:
             if token is not None:
-                raise ValueError("JavaSyntaxError() arguments 'token' and 'got' are mutually exclusive")
+                raise ValueError("arguments 'token' and 'got' are mutually exclusive")
             check_type('got', got, TokenInfo)
 
         msg = str(msg).strip()
@@ -26,15 +33,18 @@ class JavaSyntaxError(SyntaxError):
                     or not isinstance(at[1], int) \
                     or not isinstance(at[2], int) \
                     or not isinstance(at[3], str):
-                raise TypeError(f"JavaSyntaxError() argument 'at' must be string or (filename: str, line#: int, column#: int, line: str) tuple, not {typename(at)!r}")
+                raise TypeError(f"argument 'at' must be string or (filename: str, line#: int, column#: int, line: str) tuple, not {typename(at)!r}")
             # msg = msg.strip() + ' '
             # if not added_open_bracket:
             #     msg += '['
             #     added_open_bracket = True
             # msg += f"in file \"{repr(at[0])[1:-1]}\" on line {at[1]}, column {at[2]} ({at[3].strip()})"
+            lineno = at[1]
+            at = (at[0], 1, at[2]+1, at[3])
         
         if at is not None:
             super().__init__(msg, at)
+            self.lineno = lineno
         else:
             super().__init__(msg)
 
@@ -154,7 +164,7 @@ class Parser:
         token = self.token
         name = self.parse_name()
         if name == 'var':
-            raise JavaSyntaxError("'var' cannot be used as a type name", at=self.position())
+            raise JavaSyntaxError("'var' cannot be used as a type name", at=self.position(), token=token)
         return name
 
     def parse_qual_name(self):
@@ -880,6 +890,9 @@ class Parser:
         return tree.ForLoop(control=control, body=body)
 
     def parse_for_control(self):
+        if self.would_accept(':'):
+            return tree.ForControl(init=None, condition=None, update=[])
+
         try:
             with self.tokens:
                 return self.parse_enhanced_for_control()
@@ -948,7 +961,10 @@ class Parser:
     def parse_enhanced_for_var(self):
         parens = self.accept('(')
         modifiers, annotations = self.parse_mods_and_annotations(newlines=parens)
-        typ = self.parse_type(annotations=[])
+        if self.accept('var'):
+            typ = tree.GenericType(name=tree.Name('var'))
+        else:
+            typ = self.parse_type(annotations=[])
         name = self.parse_name()
         dimensions = self.parse_dimensions_opt()
         if parens:
@@ -1024,7 +1040,10 @@ class Parser:
         try:
             with self.tokens:
                 modifiers, annotations = self.parse_mods_and_annotations(newlines=False)
-                typ = self.parse_generic_type()
+                if self.accept('var'):
+                    typ = tree.GenericType(name=tree.Name('var'))
+                else:
+                    typ = self.parse_generic_type()
                 name = self.parse_name()
                 self.require('=')
                 init = self.parse_expr()
@@ -1059,14 +1078,14 @@ class Parser:
             elif self.accept('{'):
                 self.require(NEWLINE, INDENT)
                 stmts = []
-                while not self.would_accept(DEDENT):
+                while not self.would_accept((DEDENT, ENDMARKER)):
                     stmts.append(self.parse_block_statement())
                 self.require(DEDENT, '}')
                 self.accept(NEWLINE)
                 stmts = [tree.Block(stmts)]
             elif self.accept(NEWLINE, INDENT):
                 stmts = []
-                while not self.would_accept(DEDENT):
+                while not self.would_accept((DEDENT, ENDMARKER)):
                     stmts.append(self.parse_block_statement())
                 self.require(DEDENT)
                 stmts = [tree.Block(stmts)]
@@ -1078,7 +1097,12 @@ class Parser:
             self.next() # skip past the NEWLINE token
             return tree.SwitchCase(labels=labels, stmts=[], arrow=False)
         else:
-            return tree.SwitchCase(labels=labels, stmts=self.parse_block().stmts, arrow=False)
+            block = self.parse_block()
+            if isinstance(block, tree.Block):
+                stmts = block.stmts
+            else:
+                stmts = [block]
+            return tree.SwitchCase(labels=labels, stmts=stmts, arrow=False)
 
     def parse_case_label(self):
         if self.would_accept(NAME, ('->', ':')) or self.would_accept('(', NAME, ')', ('->', ':')):
@@ -1461,6 +1485,7 @@ class Parser:
             result = self.parse_logic_or_expr()            
         if self.accept('?'):
             truepart = self.parse_assignment()
+            self.require(':')
             falsepart = self.parse_conditional()
             result = tree.ConditionalExpression(condition=result, truepart=truepart, falsepart=falsepart)
         return result
@@ -1676,11 +1701,9 @@ class Parser:
         elif self.would_accept(STRING):
             import ast
             string = ast.literal_eval(self.token.string)
-            if self.token.string[-1] == "'" and len(string) != 1:
-                ends = '"'
-            else:
-                ends = self.token.string[-1]
-            result = tree.Literal(ends + repr(string)[1:-1].replace('"', R'\"') + ends)
+            string = repr(string)
+            string = string[string.index(string[-1])+1:-1]
+            result = tree.Literal('"' + string.replace('"', R'\"').replace(R"\'", "'") + '"')
             self.next()
 
         elif self.accept('true'):
@@ -1774,12 +1797,15 @@ class Parser:
             return tree.This()
 
     def parse_primary_super(self):
+        self.require('super')
         if self.would_accept('('):
             args = self.parse_args()
             if not self.would_accept(NEWLINE):
                 self.require(NEWLINE) # raises error
             return tree.SuperCall(args=args)
         else:
+            if not self.would_accept('.'):
+                raise JavaSyntaxError("'super' cannot be by itself", token=self.token, at=self.position())
             return tree.Super()
                 
     def parse_creator(self, allow_array=True):
@@ -1979,12 +2005,12 @@ class Parser:
 
 def parse_file(file, parser: Type[Parser]=Parser) -> tree.CompilationUnit:
     assert check_argument_types()
-    return parser(tokenize(file.readline)).parse_compilation_unit()
+    return parser(tokenize(file.readline), getattr(file, 'name', '<unknown source>')).parse_compilation_unit()
 
 def parse_str(s: str, encoding='utf-8', parser: Type[Parser]=Parser) -> tree.CompilationUnit:
     assert check_argument_types()
     import io
-    return parser(tokenize(io.BytesIO(bytes(s, encoding)).readline)).parse_compilation_unit()
+    return parser(tokenize(io.BytesIO(bytes(s, encoding)).readline), '<string>').parse_compilation_unit()
 
 class JavaParser(Parser):
     def __init__(self, tokens, filename='<unknown source>'):
@@ -2364,7 +2390,10 @@ class JavaParser(Parser):
 
     def parse_enhanced_for_var(self):
         modifiers, annotations = self.parse_mods_and_annotations()
-        typ = self.parse_type(annotations=[])
+        if self.accept('var'):
+            typ = tree.GenericType(name=tree.Name('var'))
+        else:
+            typ = self.parse_type(annotations=[])
         name = self.parse_name()
         dimensions = self.parse_dimensions_opt()
         return tree.VariableDeclaration(type=typ, declarators=[tree.VariableDeclarator(name=name, dimensions=dimensions)], modifiers=modifiers, annotations=annotations)
@@ -2392,6 +2421,8 @@ class JavaParser(Parser):
                     break
                 resources.append(self.parse_try_resource())
             self.require(')')
+        else:
+            resources = None
         body = self.parse_block()
         catches = []
         while self.would_accept('catch'):
@@ -2418,7 +2449,7 @@ class JavaParser(Parser):
 
     def parse_switch(self):
         self.require('switch')
-        condition = self.parse_expr()
+        condition = self.parse_condition()
         self.require('{')
         cases = []
         while not self.would_accept(('}', ENDMARKER)):
@@ -2445,7 +2476,7 @@ class JavaParser(Parser):
         else:
             self.require(':')
             stmts = []
-            while not self.would_accept(('case', 'default', ENDMARKER)):
+            while not self.would_accept(('case', 'default', '}', ENDMARKER)):
                 stmts.append(self.parse_block_statement())
             return tree.SwitchCase(labels=labels, stmts=stmts, arrow=False)
 

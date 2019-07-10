@@ -22,26 +22,37 @@ class UnitTests(unittest.TestCase):
 
 def main(args=None):
     import argparse
+    from pathlib import Path
 
     parser = argparse.ArgumentParser(description='Parse a javapy file')
     parser.add_argument('file', type=argparse.FileType('rb'),
                         help='The javapy file to parse')
-    parser.add_argument('--type', options=('Java', 'JavaPy'),
+    parser.add_argument('--type', choices=('Java', 'JavaPy'),
                         help='What syntax to use')
+    parser.add_argument('--out', metavar='FILE', type=Path,
+                        help='Where to save the output. Special name "STDOUT" can be used to output to the console.')
 
     args = parser.parse_args(args)
 
     with args.file as file:
-        parser = parse_file(file, parser=JavaParser if args.type is 'Java' else Parser)
+        unit = parse_file(file, parser=JavaParser if args.type is 'Java' else Parser)
 
-    unit = parser.parse_compilation_unit()
+    if hasattr(args, 'out'):
+        if str(args.out) == 'STDOUT':
+            filename = args.file.name
+            print(unit)
+        else:
+            with args.out.open('w') as file:
+                file.write(str(unit))
+                filename = file.name
 
-    import os.path
+    else:
+        import os.path
 
-    filename = os.path.join(os.path.dirname(args.file.name), os.path.splitext(args.file.name)[0] + '.java')
+        filename = os.path.join(os.path.dirname(args.file.name), os.path.splitext(args.file.name)[0] + '.java')
 
-    with open(filename, 'w') as file:
-        file.write(str(unit))
+        with open(filename, 'w') as file:
+            file.write(str(unit))
 
     print("Converted", filename)
 

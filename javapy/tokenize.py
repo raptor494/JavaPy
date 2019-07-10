@@ -108,7 +108,7 @@ def simple_token_str(token):
     else:
         return repr(token.string)
 
-def all_token_strs(tokens):
+def all_token_strs(tokens, exact=True):
     tokens = list(tokens)
     names = [None]*len(tokens)
     stpos = [None]*len(tokens)
@@ -119,7 +119,7 @@ def all_token_strs(tokens):
     longest_epos = 0
 
     for i, token in enumerate(tokens):
-        name = tok_name[token.exact_type]
+        name = tok_name[token.exact_type if exact else token.type]
         spos = repr(token.start)
         epos = repr(token.end)
         if longest_name < len(name):
@@ -146,8 +146,8 @@ def all_token_strs(tokens):
 
     return [f"{names[i]:{longest_name}} {stpos[i]:{longest_spos}} -> {enpos[i]:{longest_epos}}  {strs[i]}" for i in range(len(names))]
 
-def print_tokens(tokens):
-    print(*all_token_strs(tokens), sep='\n')
+def print_tokens(tokens, exact=True):
+    print(*all_token_strs(tokens, exact), sep='\n')
 
 
 class Scope(Enum):
@@ -607,6 +607,10 @@ def main(args=None):
                         help='the file to tokenize; defaults to stdin')
     parser.add_argument('-e', '--exact', dest='exact', action='store_true',
                         help='display token names using the exact type')
+    parser.add_argument('-sl', '--start-line', dest='start_line', type=int, default=0,
+                        help='Only print tokens starting on or after this line')
+    parser.add_argument('-el', '--end-line', dest='end_line', type=int, default=-1,
+                        help='Only print tokens ending on or before this line')
     args = parser.parse_args(args)
 
     try:
@@ -619,14 +623,11 @@ def main(args=None):
             filename = "<stdin>"
             tokens = _tokenize(sys.stdin.readline, None)
 
+        if args.start_line != 0 or args.end_line != -1:
+                tokens = filter(lambda token: token.start[0] >= args.start_line and token.end[0] <= args.end_line, tokens)
+
         # Output the tokenization
-        for token in tokens:
-            token_type = token.type
-            if args.exact:
-                token_type = token.exact_type
-            token_range = "%d,%d-%d,%d:" % (token.start + token.end)
-            print("%-20s%-15s%-15r" %
-                  (token_range, tok_name[token_type], token.string))
+        print_tokens(tokens, args.exact)
     except IndentationError as err:
         line, column = err.args[1][1:3]
         error(err.args[0], filename, (line, column))

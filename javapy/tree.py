@@ -1929,16 +1929,16 @@ class Literal(Expression):
         return self._str_value in ('true', 'false')
 
     def __str__(self):
-        if isinstance(self.value, str):
-            if self._str_value[0] in "rR" and self._str_value[1:4] in ("'''", '"""') or self._str_value[0:3] in ("'''", '"""'):
-                result = repr(dedent(self.value))
-            else:
-                result = repr(self.value)
-            if result[0] == "'":
-                result = '"' + result[1:-1].replace(r"\'", "'") + '"'
+        # if isinstance(self.value, str):
+        #     if self._str_value[0] in "rR" and self._str_value[1:4] in ("'''", '"""') or self._str_value[0:3] in ("'''", '"""'):
+        #         result = repr(dedent(self.value))
+        #     else:
+        #         result = repr(self.value)
+        #     if result[0] == "'":
+        #         result = '"' + result[1:-1].replace(r"\'", "'") + '"'
             
-            return result
-        else:
+        #     return result
+        # else:
             return self._str_value
 
 class NullLiteral(Expression):
