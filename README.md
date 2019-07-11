@@ -129,12 +129,7 @@ import static com.test.Example.bar;
 import static com.test.Example.kaz;
 ```
 JavaPy:
-<div class="highlight highlight-source-python">
-  <pre>
-    <span class="pl-k">from</span> com.test.Example <span class="pl-k">import static</span> foo, bar, kaz
-  </pre>
-</div>
-
+`from com.test.Example`{:.python} `import static foo, bar, kaz`{:.java}
 _______________________________________________________________________
 Normal Java:
 ```java
