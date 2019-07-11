@@ -8,10 +8,11 @@ called the same thing except with a `.java` extension.
 The program tries to format the file to be human-readable but may not be quite right in places. Use your own formatter as necessary.
 The parser does not check for semantically invalid syntax, such as duplicate variable names, duplicate methods, improper package names, illegal modifiers, etc.
 ### Differences from Normal Java
-##### Code Blocks
+#### Code Blocks
 Blocks are usually not allowed anymore. Instead of blocks, use a Python *Suite*, which is a colon followed by a series of elements all indented the same amount.
 
 **Examples**:
+
 
 Normal Java: 
 ```java
@@ -24,7 +25,9 @@ JavaPy:
 public class Example:
     public static final int x, y
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 public int foo(int x) {
@@ -43,7 +46,7 @@ public int foo(int x):
     else:
         return x % 3 * x - 6
 ```
-##### Statements containing other statements
+#### Statements containing other statements
 If a statement would normally require a parenthesised condition after
 its keyword, the parenthesis are now optional.
 
@@ -68,7 +71,9 @@ else if anotherCondition:
 else:
     doSomething2()
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 synchronized(this) {
@@ -80,7 +85,9 @@ JavaPy:
 synchronized: // If you leave the lock expression out, it defaults to 'this'.
     doSomethingWithThis()
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 try(Scanner keys = new Scanner(System.in)) {
@@ -104,7 +111,7 @@ catch NumberFormatException e:
 finally:
     System.out.println("Goodbye")
 ```
-##### Import Declarations
+#### Import Declarations
 The one statement I have brought over from python is the from ... import ... statement. 
 Syntax: `from <package-or-type-name> import [static] <qualified-name-or-wildcard> {, <qualified-name-or-wildcard>}`
 
@@ -121,7 +128,9 @@ JavaPy:
 ```python
 from java.util import List, ArrayList, Map
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 import static com.test.Example.foo;
@@ -129,10 +138,18 @@ import static com.test.Example.bar;
 import static com.test.Example.kaz;
 ```
 JavaPy:
-```javascript
-from com.test.Example import static foo, bar, kaz
+```python
+from com.test.Example import static  foo, bar, kaz
 ```
-_______________________________________________________________________
+<!-- No matter what I try, I cannot get all three keywords to be
+highlighted (from, import, static). Even though JavaScript has
+all three keywords, and the highlighting works as I want it to
+in the VS Code preview, GitHub for whatever reason only highlights
+'import'. So, I'll just stick with Java for now. -->
+
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 import java.util.*;
@@ -145,10 +162,10 @@ from java.util import *, function.*
 Additionally, a single normal import statement can have multiple comma-separated imports in it.
 
 **Example**:
-```java
+```python
 import java.util.List, java.util.ArrayList
 ```
-##### Optional parenthesis
+#### Optional parenthesis
 Sometimes, you may want to put certain things on multiple lines. You could end a line with a backslash (\\) to join it with the following line, like in Python, or
 you could wrap it in parenthesis.
 
@@ -173,7 +190,9 @@ for (int x = aVeryLongExpression(),
         x++, y++, z++:
     System.out.println(x+y+z)
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 public abstract class Example extends Superclass implements Interface1,     
@@ -191,7 +210,9 @@ public abstract class Example extends Superclass implements (Interface1,
     Interface4):
     ;
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 module com.test {
@@ -209,7 +230,9 @@ module com.test:
     provides com.example.services.ExampleService with (com.test.services.MyService,
         com.test.services.TheirService)
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 HashMap<String, 
@@ -222,7 +245,9 @@ HashMap<(String,
     HashMap<Integer,
         List<Pair<String, ?>>>)> map = new HashMap<>()
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 try(var resource1 = getResource1();
@@ -252,7 +277,9 @@ catch (IOException
         | IllegalStateException e):
     e.printStackTrace()
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 switch(day) {
@@ -284,7 +311,9 @@ switch day:
     case THURSDAY, FRIDAY -> message = "Almost"
     default -> throw new WeekendException()
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 import java.util.List;
@@ -305,7 +334,7 @@ from java.util import (
     HashMap
 )
 ```
-##### Unnecessary Commas
+#### Unnecessary Commas
 In Java, you can add a comma at the end of a list initializer:
 ```java
 int[] ints = {1,2,3,4,5,};
@@ -315,7 +344,7 @@ allows you to do it in function arguments, too.
 ```java
 foo(1,2,3,4,5,)
 ```
-##### Places where blocks ARE needed
+#### Places where blocks ARE needed
 In some places, I just couldn't do the Suite syntax for a code block, like
 in lambda expressions or anonymous classes. So, for those, you'll just need to wrap the block in braces (Note that the block still needs to be indented).
 
@@ -336,7 +365,9 @@ new Object() {
         System.out.println("Foo")
 }
 ```
-_______________________________________________________________________
+\_______________________________________________________________________
+
+
 Normal Java:
 ```java
 (String str, int x) -> {
@@ -357,22 +388,26 @@ JavaPy:
 }
 ```
 ### Additions
-##### String Literals
+#### String Literals
 A happy consequence of using a modified version of the standard Python `tokenize` module is that *most*\* of Python's string literals are supported.
 ```python
 r"This is a raw string, useful for writing regexes or Windows file locations:"
     r"C:\Users\user\Documents\GitHub\JavaPy\README.md"
+
 R"This is also a raw string. VS Code highlighters generally highlight the lower-case"
+
 R"'r' string literal as a regex, but leave this one alone."
+
 """ This is a multi-line string.
     It can span several lines with ease.
     Unlike Java 14's text blocks, the first line can appear right after the opening quotes. 
     I may or may not change this in the future when Java 14 is released.
 """
+
 R""" Raw multi-line strings are also
     supported. \ has no power here!"""
 ```
-_____________________________________________________________________________
+\______________________________________________________________________________
 
 \*Single-quoted literals aren't supported, as single quotes are reserved for   
 character literals. Also, for obvious reasons, the unicode literal is not supported. Currently, the bytes literal isn't supported either, although I may make it a literal for a `byte[]` array in the future. Additionally, the format-string literal isn't supported, but I also may implement that in the future. I'm not sure which syntax to use for that - Python's is good, but Java doesn't support Python's `format()` syntax, it uses the old C syntax. Current options are: Python syntax minus the format flags, Groovy Syntax using `$`, or some custom syntax.
