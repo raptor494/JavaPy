@@ -129,7 +129,9 @@ import static com.test.Example.bar;
 import static com.test.Example.kaz;
 ```
 JavaPy:
-`from com.test.Example`{:.python} `import static foo, bar, kaz`{:.java}
+```javascript
+from com.test.Example import static foo, bar, kaz
+```
 _______________________________________________________________________
 Normal Java:
 ```java
