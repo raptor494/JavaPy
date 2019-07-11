@@ -19,50 +19,36 @@ from Lib.tokenize import (
 from token import *
 from enum import Enum, auto
 
+#region custom token types
+next_index = 59
+custom_token_names = set()
+def add_custom_token(name, symbol=None) -> int:
+    global next_index
+    index = next_index
+    next_index += 1
+    tok_name[index] = name
+    if symbol is not None:
+        EXACT_TOKEN_TYPES[symbol] = index
+    custom_token_names.add(name)
+    return index
+
+TRIPLESHIFTEQUAL = add_custom_token('TRIPLESHIFTEQUAL', '>>>=')
+KEYWORD = add_custom_token('KEYWORD')
+DOUBLECOLON = add_custom_token('DOUBLECOLON', '::')
+DOUBLEPLUS = add_custom_token('DOUBLEPLUS', '++')
+DOUBLEMINUS = add_custom_token('DOUBLEMINUS', '--')
+DOUBLEAMPER = add_custom_token('DOUBLEAMPER', '&&')
+DOUBLEVBAR = add_custom_token('DOUBLEVBAR', '||')
+FSTRING_BEGIN = add_custom_token('FSTRING_BEGIN')
+FSTRING_MIDDLE = add_custom_token('FSTRING_MIDDLE')
+FSTRING_END = add_custom_token('FSTRING_END')
+#endregion custom token types
+
 import Lib.tokenize as Lib_tokenize
-__all__ = Lib_tokenize.__all__ + ['TRIPLESHIFTEQUAL', 'KEYWORD',
-            'DOUBLECOLON', 'DOUBLEPLUS', 'DOUBLEMINUS',
-            'DOUBLEAMPER', 'DOUBLEVBAR', 'readlines',
+__all__ = Lib_tokenize.__all__ + [*custom_token_names,
             'print_token', 'print_token_simple', 'token_str',
             'simple_token_str', 'all_token_strs', 'print_tokens']
-del Lib_tokenize
-
-TRIPLESHIFTEQUAL = 59
-tok_name[TRIPLESHIFTEQUAL] = 'TRIPLESHIFTEQUAL'
-EXACT_TOKEN_TYPES['>>>='] = TRIPLESHIFTEQUAL
-
-KEYWORD = 60
-tok_name[KEYWORD] = 'KEYWORD'
-
-DOUBLECOLON = 61
-tok_name[DOUBLECOLON] = 'DOUBLECOLON'
-EXACT_TOKEN_TYPES['::'] = DOUBLECOLON
-
-DOUBLEPLUS = 62
-tok_name[DOUBLEPLUS] = 'DOUBLEPLUS'
-EXACT_TOKEN_TYPES['++'] = DOUBLEPLUS
-
-DOUBLEMINUS = 63
-tok_name[DOUBLEMINUS] = 'DOUBLEMINUS'
-EXACT_TOKEN_TYPES['--'] = DOUBLEMINUS
-
-DOUBLEAMPER = 64
-tok_name[DOUBLEAMPER] = 'DOUBLEAMPER'
-EXACT_TOKEN_TYPES['&&'] = DOUBLEAMPER
-
-DOUBLEVBAR = 65
-tok_name[DOUBLEVBAR] = 'DOUBLEVBAR'
-EXACT_TOKEN_TYPES['||'] = DOUBLEVBAR
-
-def readlines(text: str):
-    """ Converts a string to a
-        function which returns the
-        next line when called.
-    """
-    lines = iter(text.splitlines(keepends=True))
-    def readline():
-        return bytes(next(lines), 'utf-8')
-    return readline
+del Lib_tokenize, next_index, custom_token_names, add_custom_token
 
 RESERVED_WORDS = {
     'if', 'else', 'for', 'while', 'do', 'try', 'catch', 'finally', 'synchronized', 'throw', 'return', 'switch', 'case', 'default', 'assert', 'break', 'continue',
@@ -72,6 +58,7 @@ RESERVED_WORDS = {
     'true', 'false', 'null', 'this', 'super', 'new', 
 }
 
+#region print methods
 def print_token(token):
     print(token_str(token))
 
@@ -148,17 +135,10 @@ def all_token_strs(tokens, exact=True):
 
 def print_tokens(tokens, exact=True):
     print(*all_token_strs(tokens, exact), sep='\n')
+#endregion print methods
 
 
-class Scope(Enum):
-    NONE    = '\n'
-    PAREN   = '('
-    SQBRACK = '['
-    CBRACK  = '{'
-    LAMBDA  = '->'
-    NEW     = 'new'
-    SWITCH  = 'switch'
-
+#region regexes
 # Note: we use unicode matching for names ("\w") but ascii matching for
 # number literals.
 Whitespace = r'[ \f\t]*'
@@ -188,7 +168,34 @@ Floatnumber = group(Hexfloat, Pointfloat, Expfloat) + maybe(FloatSuffix)
 Number = group(Floatnumber, Intnumber)
 
 # Return the empty string, plus all of the valid string prefixes.
-all_string_prefixes = {'', 'r', 'R'}
+def combinations(*options: str) -> set:
+    def combine(options: set) -> set:
+        if len(options) == 0:
+            return options
+        elif len(options) == 1:
+            elem = options.pop()
+            return {elem, elem.upper()}
+        else:
+            result = set()
+            for elem in options:
+                combinations = combine(options - {elem})
+                result.update(combinations)
+                lower = elem
+                upper = elem.upper()
+                for elem in combinations:
+                    result.add(lower + elem)
+                    result.add(upper + elem)
+            return result
+
+    options_set = set()
+    for elem in options:
+        assert isinstance(elem, str) and len(elem) == 1
+        elem = elem.lower()
+        assert elem not in options_set
+        options_set.add(elem)
+    return combine(options_set)
+
+all_string_prefixes = combinations('r', 'f') + combinations('r', 'b') + {""}
 
 # Note that since _all_string_prefixes includes the empty string,
 #  StringPrefix can be the empty string (making it optional).
@@ -202,6 +209,15 @@ Double = r'[^"\\]*(?:\\.[^"\\]*)*"'
 Single3 = r"[^'\\]*(?:(?:\\.|'(?!''))[^'\\]*)*'''"
 # Tail end of """ string.
 Double3 = r'[^"\\]*(?:(?:\\.|"(?!""))[^"\\]*)*"""'
+# Tail end of f' string.
+FSingle = r"[^'\\%]*(?:(?:\\.|%(?:%|n(?![\w$])))[^'\\]*)*(?:%\{?|')"
+# Tail end of f" string.
+FDouble = r'[^"\\%]*(?:(?:\\.|%(?:%|n(?![\w$])))[^"\\]*)*(?:%\{?|")'
+# Tail end of f''' string.
+FSingle3 = r"[^'\\%]*(?:(?:\\.|'(?!'')|%(?:%|n(?![\w$])))[^'\\]*)*(?:%\{?|''')"
+# Tail end of f""" string.
+FDouble3 = r'[^"\\%]*(?:(?:\\.|"(?!"")|%(?:%|n(?![\w$])))[^"\\]*)*(?:%\{?|""")'
+
 Triple = group(StringPrefix + "'''", StringPrefix + '"""')
 # Single-line ' or " string.
 String = group(StringPrefix + r"'[^\n'\\]*(?:\\.[^\n'\\]*)*'",
@@ -225,7 +241,7 @@ Operator = group(r">>>?=", r"<<=?",
                  r"[-+*/%&|^=<>!]=?",
                  r"~", r"\?")
 
-Bracket = '[][(){}]'
+Bracket = r'[][(){}]'
 Special = group(r'\r?\n', r'\.\.\.', r'[:;.,@]')
 Funny = group(Operator, Bracket, Special)
 
@@ -233,22 +249,43 @@ PlainToken = group(Number, Funny, String, Name)
 Token = Ignore + PlainToken
 
 # First (or only) line of ' or " string.
-ContStr = group(StringPrefix + r"'[^\n'\\]*(?:\\.[^\n'\\]*)*" +
+NormalStringPrefix = group("", *combinations('r', 'b'))
+FStringPrefix = group(*combinations('r', 'f') - {'r', 'R'})
+ContStr = group(FStringPrefix + r"'[^\n'\\%]*(?:(?:\\.|%(?:%|n(?![\w$])))[^\n'\\%]*)*" +
+                group("%", "'", r'\\\r?\n'),
+                FStringPrefix + r'"[^\n"\\%]*(?:(?:\\.|%(?:%|n(?![\w$])))[^\n"\\%]*)*' +
+                group("%", '"', r'\\\r?\n'),
+                NormalStringPrefix + r"'[^\n'\\]*(?:\\.[^\n'\\]*)*" +
                 group("'", r'\\\r?\n'),
-                StringPrefix + r'"[^\n"\\]*(?:\\.[^\n"\\]*)*' +
+                NormalStringPrefix + r'"[^\n"\\]*(?:\\.[^\n"\\]*)*' +
                 group('"', r'\\\r?\n'))
 PseudoExtras = group(r'\\\r?\n|\Z', Comment, Triple)
 PseudoToken = Whitespace + group(PseudoExtras, Number, Funny, ContStr, Name)
+FunnyNoBracket = group(Operator, r'[][(){]', Special)
+FStringSingleCont = r"\}" + FSingle[:-1] + r"|\\\r?\n)"
+FStringSinglePseudoToken = Whitespace + group(PseudoExtras, Number, FStringSingleCont, FunnyNoBracket, ContStr, Name)
+FStringDoubleCont = r'\}' + FDouble[:-1] + r"|\\\r?\n)"
+FStringDoublePseudoToken = Whitespace + group(PseudoExtras, Number, FStringDoubleCont, FunnyNoBracket, ContStr, Name)
+FStringSingle3Cont = r"\}" + FSingle3
+FStringSingle3PseudoToken = Whitespace + group(PseudoExtras, Number, FStringSingle3Cont, FunnyNoBracket, ContStr, Name)
+FStringDouble3Cont = r'\}' + FDouble3
+FStringDouble3PseudoToken = Whitespace + group(PseudoExtras, Number, FStringDouble3Cont, FunnyNoBracket, ContStr, Name)
 
 # For a given string prefix plus quotes, endpats maps it to a regex
 #  to match the remainder of that string. _prefix can be empty, for
 #  a normal single or triple quoted string (with no prefix).
 endpats = {}
 for _prefix in all_string_prefixes:
-    endpats[_prefix + "'"] = Single
-    endpats[_prefix + '"'] = Double
-    endpats[_prefix + "'''"] = Single3
-    endpats[_prefix + '"""'] = Double3
+    if 'f' in _prefix or 'F' in _prefix:
+        endpats[_prefix + "'"] = FSingle
+        endpats[_prefix + '"'] = FDouble
+        endpats[_prefix + "'''"] = FSingle3
+        endpats[_prefix + '"""'] = FDouble3
+    else:
+        endpats[_prefix + "'"] = Single
+        endpats[_prefix + '"'] = Double
+        endpats[_prefix + "'''"] = Single3
+        endpats[_prefix + '"""'] = Double3
 
 # A set of all of the single and triple quoted string prefixes,
 #  including the opening quotes.
@@ -260,7 +297,29 @@ for t in all_string_prefixes:
     for u in (t + '"""', t + "'''"):
         triple_quoted.add(u)
 
+#endregion regexes
+
 tabsize = 8
+
+class Scope(Enum):
+    NONE    = '\n'
+    PAREN   = '('
+    SQBRACK = '['
+    CBRACK  = '{'
+    LAMBDA  = '->'
+    NEW     = 'new'
+    SWITCH  = 'switch'
+    STRING  = '""'
+    FSTRING_SINGLE = "f'"
+    FSTRING_DOUBLE = 'f"'
+    FSTRING_SINGLE3 = "f'''"
+    FSTRING_DOUBLE3 = 'f"""'
+    FSTRING_SINGLE_BRACK = "f'{"
+    FSTRING_DOUBLE_BRACK = 'f"{'
+    FSTRING_SINGLE3_BRACK = "f'''{"
+    FSTRING_DOUBLE3_BRACK = 'f"""{'
+
+Scope.FSTRINGS = (Scope.FSTRING_SINGLE, Scope.FSTRING_DOUBLE, Scope.FSTRING_SINGLE3, Scope.FSTRING_DOUBLE3, Scope.FSTRING_SINGLE_BRACK, Scope.FSTRING_DOUBLE_BRACK, Scope.FSTRING_SINGLE3_BRACK, Scope.FSTRING_DOUBLE3_BRACK)
 
 def tokenize(readline):
     """
@@ -291,6 +350,56 @@ def tokenize(readline):
 
 def _tokenize(readline, encoding):
     import re
+
+    def get_fstring_scope(token: str, brackets: bool) -> Scope:
+        if token[1] == '"':
+            if token[1:4] == '"""':
+                return Scope.FSTRING_DOUBLE3_BRACK if brackets else Scope.FSTRING_DOUBLE3
+            else:
+                return Scope.FSTRING_DOUBLE_BRACK if brackets else Scope.FSTRING_DOUBLE
+        elif token[1] == "'":
+            if token[1:4] == "'''":
+                return Scope.FSTRING_SINGLE3_BRACK if brackets else Scope.FSTRING_SINGLE3
+            else:
+                return Scope.FSTRING_SINGLE_BRACK if brackets else Scope.FSTRING_SINGLE
+        elif token[2] == '"':
+            if token[2:5] == '"""':
+                return Scope.FSTRING_DOUBLE3_BRACK if brackets else Scope.FSTRING_DOUBLE3
+            else:
+                return Scope.FSTRING_DOUBLE_BRACK if brackets else Scope.FSTRING_DOUBLE
+        elif token[2] == "'":
+            if token[2:5] == "'''":
+                return Scope.FSTRING_SINGLE3_BRACK if brackets else Scope.FSTRING_SINGLE3
+            else:
+                return Scope.FSTRING_SINGLE_BRACK if brackets else Scope.FSTRING_SINGLE
+        else:
+            assert False
+
+    def get_str_token_type(token: str) -> int:
+        if token.startswith("}"):
+            if token.endswith("%"):
+                return FSTRING_MIDDLE
+            else:
+                return FSTRING_END
+        elif token.endswith("%"):
+            if token.endswith("%"):
+                return FSTRING_MIDDLE
+            else:
+                return FSTRING_BEGIN
+        else:
+            return STRING
+
+    def choose_pseudotoken_based_on_scope():
+        if scope[-1] is Scope.FSTRING_SINGLE_BRACK:
+            return FStringSinglePseudoToken
+        elif scope[-1] is Scope.FSTRING_SINGLE3_BRACK:
+            return FStringSingle3PseudoToken
+        elif scope[-1] is Scope.FSTRING_DOUBLE_BRACK:
+            return FStringDoublePseudoToken
+        elif scope[-1] is Scope.FSTRING_DOUBLE3_BRACK:
+            return FStringDouble3PseudoToken
+        else:
+            return PseudoToken
 
     lnum = continued = 0
     scope = [Scope.NONE]
@@ -334,9 +443,18 @@ def _tokenize(readline, encoding):
             endmatch = endprog.match(line)
             if endmatch:
                 pos = end = endmatch.end(0)
-                last = TokenInfo(STRING, contstr + line[:end],
+                token = contstr + line[:end]
+                last = TokenInfo(get_str_token_type(token), token,
                             strstart, (lnum, end), contline + line)
                 yield last
+                if not token.startswith("}"):
+                    if token.endswith("%{"):
+                        scope.append(get_fstring_scope(token, brackets=True))
+                    elif token.endswith("%"):
+                        scope.append(get_fstring_scope(token, brackets=False))
+                elif not token.endswith("%{") and not token.endswith("%"):
+                    assert scope[-1] in Scope.FSTRINGS
+                    del scope[-1]
                 contstr, needcont = '', 0
                 contline = None
             elif needcont and line[-2:] != '\\\n' and line[-3:] != '\\\r\n':
@@ -351,7 +469,7 @@ def _tokenize(readline, encoding):
                 contline += line
                 continue
 
-        elif contcomm:
+        elif contcomm:                            # continued multi-line comment
             if not line:
                 raise TokenError("EOF in multi-line comment", commstart)
             endmatch = endprog.match(line)
@@ -422,7 +540,7 @@ def _tokenize(readline, encoding):
             continued = 0
 
         while pos < maxpos:
-            pseudomatch = re.compile(PseudoToken, re.UNICODE).match(line, pos)
+            pseudomatch = re.compile(choose_pseudotoken_based_on_scope(), re.UNICODE).match(line, pos)
             if pseudomatch:                                # scan for tokens
                 start, end = pseudomatch.span(1)
                 spos, epos, pos = (lnum, start), (lnum, end), end
@@ -430,6 +548,7 @@ def _tokenize(readline, encoding):
                     continue
                 token, initial = line[start:end], line[start]
 
+                
                 if (initial in numchars or                  # ordinary number
                     (initial == '.' and token != '.' and token != '...')):
                     last = TokenInfo(NUMBER, token, spos, epos, line)

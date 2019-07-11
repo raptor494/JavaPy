@@ -4,20 +4,63 @@ import math
 from enum import Enum
 from collections import OrderedDict
 from numbers import Number
-from typing import _GenericAlias
+from typing import _GenericAlias, Optional, Tuple
+from Lib.tokenize import TokenInfo
+from typeguard import check_type, check_argument_types
+from javapy.tokenize import simple_token_str
 from functools import wraps
 
-NoneType = type(None)
+class JavaSyntaxError(SyntaxError):
+    def __init__(self, msg: str='', at: Optional[Tuple[str, int, int, str]]=None, token: Optional[TokenInfo]=None, got: Optional[TokenInfo]=None):
+        """        
+        Args:
+            msg (str, optional): The error message. Defaults to ''.
+            at (Tuple[str, int, int, str], optional): A tuple of (filename, line, column, line string). Defaults to None.
+            token (TokenInfo, optional): The error token. Defaults to None.
+            got (TokenInfo, optional): The token which was gotten (adjusts the error message slightly). Defaults to None.
+        """
+        if got is None:
+            check_type('token', token, Optional[TokenInfo])
+        else:
+            if token is not None:
+                raise ValueError("arguments 'token' and 'got' are mutually exclusive")
+            check_type('got', got, TokenInfo)
+
+        msg = str(msg).strip()
+
+        if token is not None:
+            msg += ' (token ' + simple_token_str(token) + ')'
+        elif got is not None:
+            msg += ', got ' + simple_token_str(got)
+
+        if at is not None:
+            if not isinstance(at, tuple) or len(at) != 4 \
+                    or not isinstance(at[0], str) \
+                    or not isinstance(at[1], int) \
+                    or not isinstance(at[2], int) \
+                    or not isinstance(at[3], str):
+                raise TypeError(f"argument 'at' must be string or (filename: str, line#: int, column#: int, line: str) tuple, not {typename(at)!r}")
+            # msg = msg.strip() + ' '
+            # if not added_open_bracket:
+            #     msg += '['
+            #     added_open_bracket = True
+            # msg += f"in file \"{repr(at[0])[1:-1]}\" on line {at[1]}, column {at[2]} ({at[3].strip()})"
+            lineno = at[1]
+            at = (at[0], 1, at[2]+1, at[3])
+        
+        if at is not None:
+            super().__init__(msg, at)
+            self.lineno = lineno
+        else:
+            super().__init__(msg)
 
 class EmptyLineHandling(Enum):
     NOT_SPECIAL = 0
     REPLACE_WITH_EMPTY = 1
     REMOVE = 2
 
-def lstrip_multiline(string: str, empty_line_handling=EmptyLineHandling.REPLACE_WITH_EMPTY, ignore_first=False) -> str:
-    typecheck(string, str)
-    typecheck(empty_line_handling, EmptyLineHandling)
-    typecheck(ignore_first, bool)
+def lstrip_multiline(string: str, empty_line_handling: EmptyLineHandling=EmptyLineHandling.REPLACE_WITH_EMPTY, ignore_first: bool=False) -> str:
+    assert check_argument_types()
 
     lines = string.splitlines()
 
